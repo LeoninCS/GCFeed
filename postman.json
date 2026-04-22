@@ -1,0 +1,104 @@
+{
+  "info": {
+    "_postman_id": "7d37992e-bfd0-4ce7-94be-6d93bf887d4b",
+    "name": "feedsystem_video_hard",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Postman collection for feedsystem_video_hard API"
+  },
+  "variable": [
+    {
+      "key": "scheme",
+      "value": "http"
+    },
+    {
+      "key": "host",
+      "value": "localhost"
+    },
+    {
+      "key": "port",
+      "value": "8080"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{scheme}}://{{host}}:{{port}}/health",
+          "protocol": "{{scheme}}",
+          "host": [
+            "{{host}}"
+          ],
+          "port": "{{port}}",
+          "path": [
+            "health"
+          ]
+        },
+        "description": "Service health check"
+      },
+      "response": []
+    },
+    {
+      "name": "Register",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"account\": \"test\",\n  \"password\": \"12345678\",\n  \"nickname\": \"tester\"\n}"
+        },
+        "url": {
+          "raw": "{{scheme}}://{{host}}:{{port}}/auth/register",
+          "protocol": "{{scheme}}",
+          "host": [
+            "{{host}}"
+          ],
+          "port": "{{port}}",
+          "path": [
+            "auth",
+            "register"
+          ]
+        },
+        "description": "Register a new account"
+      },
+      "response": []
+    },
+    {
+      "name": "Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"account\": \"test\",\n  \"password\": \"12345678\"\n}"
+        },
+        "url": {
+          "raw": "{{scheme}}://{{host}}:{{port}}/auth/login",
+          "protocol": "{{scheme}}",
+          "host": [
+            "{{host}}"
+          ],
+          "port": "{{port}}",
+          "path": [
+            "auth",
+            "login"
+          ]
+        },
+        "description": "Login with account and password"
+      },
+      "response": []
+    }
+  ]
+}
