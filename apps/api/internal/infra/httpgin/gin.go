@@ -1,8 +1,8 @@
-package httpgin
+package infrahttpgin
 
 import (
-	"feedsystem_video_hard/internal/infra/config"
 	"strconv"
+	infraconfig "feedsystem_video_hard/internal/infra/config"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,7 +13,7 @@ func Init() *gin.Engine {
 	return g
 }
 
-func Run(cfg *config.Config, g *gin.Engine) error {
+func Run(cfg *infraconfig.Config, g *gin.Engine) error {
 	port := cfg.Port
 	addr := ":" + strconv.Itoa(port)
 	return g.Run(addr)
