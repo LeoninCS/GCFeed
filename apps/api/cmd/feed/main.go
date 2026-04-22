@@ -41,4 +41,5 @@ func main() {
 		log.Fatalf("run server failed: %v", err)
 	}
 	log.Println("server is running")
+
 }
