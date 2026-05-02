@@ -17,7 +17,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("load config failed: %v", err)
 	}
-	log.Printf("config loaded: %+v", cfg)
+	log.Printf(
+		"config loaded: port=%d database=%s:%d/%s jwt_access_ttl=%s",
+		cfg.Port,
+		cfg.Database.Host,
+		cfg.Database.Port,
+		cfg.Database.Name,
+		cfg.JWT.AccessTTL,
+	)
 
 	// 初始化数据库连接
 	db, err := infradatabase.New(cfg.Database)
@@ -37,9 +44,9 @@ func main() {
 	log.Println("router registered")
 
 	// 运行服务器
+	log.Println("server is running")
 	if err := infrahttpgin.Run(cfg, g); err != nil {
 		log.Fatalf("run server failed: %v", err)
 	}
-	log.Println("server is running")
 
 }
