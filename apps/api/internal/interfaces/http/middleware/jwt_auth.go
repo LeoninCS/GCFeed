@@ -1,9 +1,9 @@
 package interfaceshttpmiddleware
 
 import (
+	infrajwt "feedsystem_video_hard/internal/infra/jwt"
 	"net/http"
 	"strings"
-	infrajwt "feedsystem_video_hard/internal/infra/jwt"
 
 	"github.com/gin-gonic/gin"
 )

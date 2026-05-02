@@ -13,6 +13,13 @@ type LoginByPasswordRequest struct {
 	Password string `json:"password"`
 }
 
+// 用户资料更新请求
+type UpdateProfileRequest struct {
+	Nickname  *string `json:"nickname"`
+	AvatarURL *string `json:"avatar_url"`
+	Bio       *string `json:"bio"`
+}
+
 // 账号登录响应
 type tokenResponse struct {
 	AccessToken      string `json:"access_token"`
@@ -22,8 +29,11 @@ type tokenResponse struct {
 
 // 用户信息响应
 type userProfileResponse struct {
-	ID       int64  `json:"id"`
-	Account  string `json:"account"`
-	Nickname string `json:"nickname"`
-	Role     string `json:"role"`
+	ID        int64  `json:"id"`
+	Account   string `json:"account"`
+	Nickname  string `json:"nickname"`
+	AvatarURL string `json:"avatar_url"`
+	Bio       string `json:"bio"`
+	Status    int    `json:"status"`
+	Role      string `json:"role"`
 }

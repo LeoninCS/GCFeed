@@ -9,6 +9,7 @@
 | --- | --- | --- | --- | --- |
 | POST | `/api/auth/register` | 用户注册 | 无 | 支持 |
 | POST | `/api/auth/login/password` | 密码登录并获取 Token | 无 | - |
+| POST | `/api/auth/logout` | 用户登出 | Bearer JWT | - |
 | GET | `/api/users/me` | 获取当前用户资料 | Bearer JWT | - |
 | PATCH | `/api/users/me` | 更新头像、昵称、简介 | Bearer JWT | 支持 |
 

@@ -5,6 +5,8 @@ import "errors"
 var ErrEmptyAccount = errors.New("account is required")
 var ErrEmptyPassword = errors.New("password is required")
 var ErrEmptyNickname = errors.New("nickname is required")
+var ErrInvalidUserID = errors.New("user id must be positive")
+var ErrEmptyProfileUpdate = errors.New("profile update is required")
 var ErrUserNotFound = errors.New("user not found")
 var ErrAccountAlreadyExists = errors.New("account already exists")
 var ErrInvalidCredentials = errors.New("invalid credentials")

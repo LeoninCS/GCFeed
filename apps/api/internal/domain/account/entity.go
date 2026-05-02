@@ -6,14 +6,20 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const RoleUser = "user"
+const (
+	RoleUser     = "user"
+	StatusNormal = 1
+)
 
 type User struct {
-	ID       int64
-	Account  string
-	Password string
-	Nickname string
-	Role     string
+	ID        int64
+	Account   string
+	Password  string
+	Nickname  string
+	AvatarURL string
+	Bio       string
+	Status    int
+	Role      string
 }
 
 func New(account, password, nickname string) (*User, error) {
@@ -40,25 +46,34 @@ func New(account, password, nickname string) (*User, error) {
 		Account:  account,
 		Password: string(hashedPassword),
 		Nickname: nickname,
+		Status:   StatusNormal,
 		Role:     RoleUser,
 	}, nil
 }
 
-func RestoreUser(id int64, account, password, nickname, role string) *User {
+func RestoreUser(id int64, account, password, nickname, avatarURL, bio string, status int, role string) *User {
 	account = strings.TrimSpace(account)
 	password = strings.TrimSpace(password)
 	nickname = strings.TrimSpace(nickname)
+	avatarURL = strings.TrimSpace(avatarURL)
+	bio = strings.TrimSpace(bio)
 	role = strings.TrimSpace(role)
+	if status == 0 {
+		status = StatusNormal
+	}
 	if role == "" {
 		role = RoleUser
 	}
 
 	return &User{
-		ID:       id,
-		Account:  account,
-		Password: password,
-		Nickname: nickname,
-		Role:     role,
+		ID:        id,
+		Account:   account,
+		Password:  password,
+		Nickname:  nickname,
+		AvatarURL: avatarURL,
+		Bio:       bio,
+		Status:    status,
+		Role:      role,
 	}
 }
 
@@ -70,5 +85,27 @@ func (u *User) Authenticate(password string) error {
 	if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)); err != nil {
 		return ErrInvalidCredentials
 	}
+	return nil
+}
+
+func (u *User) UpdateProfile(nickname, avatarURL, bio *string) error {
+	if nickname == nil && avatarURL == nil && bio == nil {
+		return ErrEmptyProfileUpdate
+	}
+
+	if nickname != nil {
+		value := strings.TrimSpace(*nickname)
+		if value == "" {
+			return ErrEmptyNickname
+		}
+		u.Nickname = value
+	}
+	if avatarURL != nil {
+		u.AvatarURL = strings.TrimSpace(*avatarURL)
+	}
+	if bio != nil {
+		u.Bio = strings.TrimSpace(*bio)
+	}
+
 	return nil
 }
