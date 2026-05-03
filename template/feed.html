@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>GCFeed - User Feed Browsing Screen</title>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Tailwind Configuration -->
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "surface-container-low": "#1b1b1d",
+                "secondary-container": "#de0541",
+                "tertiary": "#00dce5",
+                "on-secondary-container": "#fff1f1",
+                "secondary-fixed-dim": "#ffb3b5",
+                "on-surface-variant": "#c0c6d6",
+                "error-container": "#93000a",
+                "primary-fixed-dim": "#aac7ff",
+                "on-primary-container": "#002957",
+                "on-error": "#690005",
+                "on-tertiary-fixed": "#002021",
+                "on-surface": "#e4e2e4",
+                "secondary": "#ffb3b5",
+                "primary-container": "#3e90ff",
+                "on-primary-fixed": "#001b3e",
+                "on-primary": "#003064",
+                "surface-variant": "#353437",
+                "tertiary-container": "#00a1a7",
+                "surface-bright": "#39393b",
+                "outline": "#8b91a0",
+                "inverse-surface": "#e4e2e4",
+                "inverse-primary": "#005db8",
+                "on-secondary-fixed-variant": "#920027",
+                "surface-dim": "#131315",
+                "inverse-on-surface": "#303032",
+                "surface-container-high": "#2a2a2c",
+                "background": "#131315",
+                "on-tertiary": "#003739",
+                "secondary-fixed": "#ffdada",
+                "tertiary-fixed": "#63f7ff",
+                "on-error-container": "#ffdad6",
+                "tertiary-fixed-dim": "#00dce5",
+                "outline-variant": "#414754",
+                "surface-tint": "#aac7ff",
+                "surface-container-lowest": "#0e0e10",
+                "on-tertiary-container": "#002f32",
+                "surface-container": "#1f1f21",
+                "surface-container-highest": "#353437",
+                "on-secondary-fixed": "#40000c",
+                "on-tertiary-fixed-variant": "#004f53",
+                "primary": "#aac7ff",
+                "error": "#ffb4ab",
+                "primary-fixed": "#d6e3ff",
+                "on-secondary": "#680019",
+                "on-background": "#e4e2e4",
+                "on-primary-fixed-variant": "#00468d",
+                "surface": "#131315"
+        },
+        "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "full": "9999px"
+        },
+        "spacing": {
+                "lg": "24px",
+                "container-margin": "24px",
+                "xl": "40px",
+                "unit": "4px",
+                "sm": "8px",
+                "xs": "4px",
+                "gutter": "16px",
+                "md": "16px",
+                "gap-panel": "24px",
+                "feed-min-width": "720px",
+                "topbar": "64px",
+                "padding-page": "24px",
+                "sidebar-user": "220px",
+                "feed-detail-width": "360px",
+                "sidebar-admin": "240px"
+        },
+        "fontFamily": {
+                "headline-md": [
+                        "Inter"
+                ],
+                "label-sm": [
+                        "Inter"
+                ],
+                "headline-xl": [
+                        "Inter"
+                ],
+                "label-md": [
+                        "Inter"
+                ],
+                "body-lg": [
+                        "Inter"
+                ],
+                "display-lg": [
+                        "Inter"
+                ],
+                "body-md": [
+                        "Inter"
+                ],
+                "metrics": [
+                        "Inter"
+                ],
+                "feed-title-sm": [
+                        "Inter"
+                ],
+                "feed-title-lg": [
+                        "Inter"
+                ],
+                "section-title": [
+                        "Inter"
+                ],
+                "heading": [
+                        "Inter"
+                ],
+                "body": [
+                        "Inter"
+                ]
+        },
+        "fontSize": {
+                "headline-md": [
+                        "24px",
+                        {
+                                "lineHeight": "1.3",
+                                "fontWeight": "600"
+                        }
+                ],
+                "label-sm": [
+                        "12px",
+                        {
+                                "lineHeight": "1.2",
+                                "letterSpacing": "0.05em",
+                                "fontWeight": "600"
+                        }
+                ],
+                "headline-xl": [
+                        "32px",
+                        {
+                                "lineHeight": "1.2",
+                                "letterSpacing": "-0.01em",
+                                "fontWeight": "700"
+                        }
+                ],
+                "label-md": [
+                        "14px",
+                        {
+                                "lineHeight": "1.2",
+                                "letterSpacing": "0.01em",
+                                "fontWeight": "500"
+                        }
+                ],
+                "body-lg": [
+                        "18px",
+                        {
+                                "lineHeight": "1.6",
+                                "fontWeight": "400"
+                        }
+                ],
+                "display-lg": [
+                        "48px",
+                        {
+                                "lineHeight": "1.1",
+                                "letterSpacing": "-0.02em",
+                                "fontWeight": "700"
+                        }
+                ],
+                "body-md": [
+                        "16px",
+                        {
+                                "lineHeight": "1.6",
+                                "fontWeight": "400"
+                        }
+                ],
+                "metrics": [
+                        "13px",
+                        {
+                                "lineHeight": "18px",
+                                "fontWeight": "650"
+                        }
+                ],
+                "feed-title-sm": [
+                        "28px",
+                        {
+                                "lineHeight": "34px",
+                                "fontWeight": "700"
+                        }
+                ],
+                "section-title": [
+                        "18px",
+                        {
+                                "lineHeight": "28px",
+                                "fontWeight": "600"
+                        }
+                ],
+                "body": [
+                        "14px",
+                        {
+                                "lineHeight": "22px",
+                                "fontWeight": "400"
+                        }
+                ]
+        }
+},
+    },
+  }
+</script>
+<style>
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: rgba(255,255,255,0.2);
+            border-radius: 20px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background-color: rgba(255,255,255,0.4);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body text-body h-screen w-screen overflow-hidden flex flex-col antialiased">
+<!-- TopNavBar (Shared Component JSON) -->
+<nav class="fixed top-0 w-full z-50 h-16 flex items-center justify-between px-6 bg-surface/80 backdrop-blur-[28px] text-primary font-sans text-sm font-medium tracking-tight border-b border-surface-container-highest shadow-sm transition-colors">
+<!-- Left: Logo & Search (search_bar: on_left) -->
+<div class="flex items-center gap-6 h-full">
+<span class="text-2xl font-black tracking-tighter text-on-surface">GCFeed</span>
+<div class="relative hidden md:block">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-[20px]">search</span>
+<input class="h-9 w-[280px] bg-surface-container border-transparent rounded-full pl-10 pr-4 text-sm text-on-surface focus:ring-2 focus:ring-primary focus:bg-surface-container-high transition-all outline-none placeholder:text-on-surface-variant" placeholder="Search" type="text"/>
+</div>
+</div>
+<!-- Center: Navigation Links -->
+<div class="hidden md:flex items-center gap-8 h-full">
+<!-- Active State Logic: Feed Browsing -> Explore -->
+<a class="h-full flex items-center text-primary border-b-2 border-primary pb-4 pt-4 active:scale-95 transition-transform duration-150" href="#">Explore</a>
+<!-- Inactive States -->
+<a class="h-full flex items-center text-on-surface-variant hover:text-on-surface transition-colors active:scale-95 duration-150" href="#">Trending</a>
+<a class="h-full flex items-center text-on-surface-variant hover:text-on-surface transition-colors active:scale-95 duration-150" href="#">Subscriptions</a>
+<a class="h-full flex items-center text-on-surface-variant hover:text-on-surface transition-colors active:scale-95 duration-150" href="#">Library</a>
+</div>
+<!-- Right: Actions -->
+<div class="flex items-center gap-3">
+<button class="h-9 px-5 bg-primary hover:bg-primary-container text-on-primary rounded-full text-sm font-semibold transition-all shadow-sm active:scale-95 duration-150">Upload</button>
+<button class="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors active:scale-95 duration-150">
+<span class="material-symbols-outlined text-[20px]">notifications</span>
+</button>
+<button class="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors active:scale-95 duration-150">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+</button>
+<div class="w-8 h-8 rounded-full overflow-hidden ml-2 border border-surface-container-highest shrink-0 cursor-pointer hover:opacity-80 transition-opacity">
+<img class="w-full h-full object-cover" data-alt="A close-up portrait of a young person in a brightly lit studio setting, creating a clean and modern aesthetic. The lighting is soft and even, highlighting natural skin tones against a neutral background. The image serves as a high-quality user profile avatar for a sleek, premium digital interface, perfectly complementing a minimalistic glassmorphic design system." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAEH5ZNpPdQoO7Qiy3CGshEypK0dp1HFeVoZ1TAHDLhfcvYMg_js-k2rhBTIPpqMjs6GQpIgKMnUhIu0tY_QYUCTocPD70FDbGWYmHI25NPQ1Quod_7Ssaq0ICv7vvwNephDLNouriPhG7ubVy8GZKbFP9Qi-2yLe2mzST0t9Vfygo2jvgiHITh11LVRZ2ZTcE3nmySn6ZMnpqONtz0zbaKbQMLsDNfR-5smwYHCQLvdp6U5U2-OW_kZS1P6U9vR_PN9Ey84a1VDgRZ"/>
+</div>
+</div>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="flex flex-1 w-full pt-16 h-full overflow-hidden">
+<!-- Left Sidebar (User Nav) -->
+<aside class="w-sidebar-user h-full shrink-0 flex flex-col bg-surface/95 backdrop-blur-3xl border-r border-surface-container-highest pt-6 z-40">
+<div class="flex flex-col h-full custom-scrollbar overflow-y-auto">
+<nav class="flex flex-col gap-1 px-2">
+<!-- Feed (Active) -->
+<a class="flex items-center gap-4 px-4 py-3 rounded-lg text-tertiary font-bold transition-all hover:bg-surface-container-high group" href="#">
+<span class="material-symbols-outlined text-[28px]" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="text-[18px]">Feed</span>
+</a>
+<!-- Friends -->
+<a class="flex items-center gap-4 px-4 py-3 rounded-lg text-on-surface hover:bg-surface-container transition-all group" href="#">
+<span class="material-symbols-outlined text-[28px]">group</span>
+<span class="text-[18px]">Friends</span>
+</a>
+<!-- Explore -->
+<a class="flex items-center gap-4 px-4 py-3 rounded-lg text-on-surface hover:bg-surface-container transition-all group" href="#">
+<span class="material-symbols-outlined text-[28px]">explore</span>
+<span class="text-[18px]">Explore</span>
+</a>
+<!-- LIVE -->
+<a class="flex items-center gap-4 px-4 py-3 rounded-lg text-on-surface hover:bg-surface-container transition-all group" href="#">
+<span class="material-symbols-outlined text-[28px]">live_tv</span>
+<span class="text-[18px]">LIVE</span>
+</a>
+<!-- Profile -->
+<a class="flex items-center gap-4 px-4 py-3 rounded-lg text-on-surface hover:bg-surface-container transition-all group" href="#">
+<span class="material-symbols-outlined text-[28px]">person</span>
+<span class="text-[18px]">Profile</span>
+</a>
+</nav>
+<div class="mt-4 pt-4 border-t border-surface-container-highest px-4">
+<p class="text-on-surface-variant text-[14px] font-semibold mb-3">Suggested accounts</p>
+<div class="flex flex-col gap-3">
+<div class="flex items-center gap-3 cursor-pointer hover:bg-surface-container p-1 rounded-lg transition-colors">
+<img alt="Elena Rostova" class="w-8 h-8 rounded-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCfqKNkFePsMLBDZYqyGujFrw7aFgKuMbRmsfxl2RU6YwArmAMkd2WUVUnThLXS1IZ06GUZtBEwByaBo_gZorXeQZDI80CTTRv_UVwE8zOrSzQcYoPs610EFhylJndZzJdHfZ_baQVq05Jrr2nIs7XAaPX61Z2ztTTJW_J15FaeL8r-SltWdmFelv1138YY_ZzeCtPYBsTCVFSJ4jCOoKS346foSAxivJV0V-VKDfC87OD2aNJvmJUGF28t-s9gS2MaTUjbEeLcHAmt"/>
+<span class="text-on-surface text-[14px] font-bold truncate">Elena Rostova</span>
+</div>
+<div class="flex items-center gap-3 cursor-pointer hover:bg-surface-container p-1 rounded-lg transition-colors">
+<img alt="Marcus_V" class="w-8 h-8 rounded-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB7uaOE97IUWoZ4UATBaoSTyBJZUmaVDIznnBD7dhe-84PxZmlZ1V8lAgzaub9vACzqMryk0r96bzhbWPWr4VFjb6IQKxipytjB0_hO7yATBoAmjoMitTHcKYf-KgpXjA0_I4DP8Kym-JYSOhbsDxtiwXkZk1KHPGMerpuvZm24J8JkfExcRH-_8MFsLcGC6tkPin9XxwLp41Hu7yaTCJ6G2--rRM8JW2W9wtB0kXH3sn6754xv94qNtJNdCnyg7cpmz7tbIePycKd5"/>
+<span class="text-on-surface text-[14px] font-bold truncate">Marcus_V</span>
+</div>
+</div>
+</div>
+<div class="mt-6 pt-4 border-t border-surface-container-highest px-4 pb-10">
+<p class="text-on-surface-variant text-[14px] font-semibold mb-3">Following accounts</p>
+<div class="flex flex-col gap-3">
+<div class="flex items-center gap-3 cursor-pointer hover:bg-surface-container p-1 rounded-lg transition-colors">
+<img alt="NeoTokyo_Visuals" class="w-8 h-8 rounded-full object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCRykmTQapdwWxEn7aj2ZWySXn6-vKDNUef9rBSrbj-vaoLSdkOejB5ZhA1SAE6Hchx7c5DcrARw4qUmpXV07Ivks85JMJjudo-5pK8Cjm3F4c72BU7nAVXHH75aycxQ6h81RXVqnmCd1lZxnT-AymFxtysHadlZdnQpjMXTrmslAK4HG00IbSbzR0wQO9RQBoq2cBn_Nbz4tsBWlbvyL9QqUyWP4nFHfBwZG_yrBSa72zPt3Wti3ufaPNQIwoJRH0pPhMmjTmqY1g4"/>
+<span class="text-on-surface text-[14px] font-bold truncate">NeoTokyo_Visuals</span>
+</div>
+</div>
+</div>
+</div>
+</aside>
+<!-- Center Stage (Video Feed) -->
+<main class="flex-1 h-full min-w-feed-min-width p-gap-panel flex flex-col relative overflow-hidden bg-background">
+<!-- Channel Tabs (Absolute positioned above video) -->
+<div class="absolute top-8 left-1/2 -translate-x-1/2 z-20 flex bg-surface/60 backdrop-blur-2xl rounded-full p-1 border border-surface-container-highest shadow-lg">
+<button class="px-6 py-2 rounded-full font-body text-metrics font-bold text-on-surface bg-surface-container-high shadow-sm transition-all">Recommend</button>
+<button class="px-6 py-2 rounded-full font-body text-metrics font-semibold text-on-surface-variant hover:text-on-surface transition-all">Following</button>
+</div>
+<!-- Video Container (16:9) -->
+<div class="w-full h-full max-h-[calc(100vh-140px)] aspect-video bg-black rounded-3xl overflow-hidden relative shadow-[0_20px_60px_-15px_rgba(0,0,0,0.9)] border border-surface-container-highest flex items-center justify-center my-auto group">
+<!-- Blurred Backdrop of current frame -->
+<img class="absolute inset-0 w-full h-full object-cover scale-[1.15] blur-3xl opacity-60" data-alt="A cinematic, low-light image of a dense, misty neon-lit city street at night. The deep, moody purples, blacks, and vibrant pink accents create an atmospheric, immersive background. The overall aesthetic perfectly matches a premium dark-mode cinematic interface, providing a highly blurred, high-contrast luminous foundation for foreground video content." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBoRvSlHsGSK5JYfx8r7praM2C7qfaT8MA3oCiEBrp2qR1Ew_d_BBW1bayhxrA9QACs__BYjSfSKuyEvZcT0YtXO8fuXj8VQ2YLiuTimXER4hQXjdpWsSohnXC6O_Q_Ax3IYrf6kxn3pfnf3gbpdpHg6Z_gBGl-pwwh9QZ1MJMCDFNOgDIYu6YlIUcGa_f9muHACh25ulddKdk1mb9Ml2sMhagIzsTCt5xLaDwtQUM8HjhIkIrThVgRoRpajSVgMilICEgR6TB1uoLn"/>
+<!-- Main Vertical Video (9:16) -->
+<img class="relative h-full aspect-[9/16] object-contain z-10 shadow-2xl transition-transform duration-700 group-hover:scale-[1.02]" data-alt="A striking vertical shot capturing the raw energy of a futuristic cyberpunk cityscape at night, characterized by dense architecture and glowing neon signs reflecting off rain-slicked pavement. The lighting is cinematic and dramatic, relying on a sophisticated palette of deep blacks punctuated by intense accents of vibrant cyan and magenta. The mood is mysterious and technologically advanced, ideal for high-impact vertical video consumption." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAqJ-TzzKMaUW37h8FSVT6sySUyelD9iqAXQM8_V6Ynq8kYCFHFl-i5bCoymxVX4HRAhhWgD59axTWzgDp0cHyhyxghctwlas-jU5GyIstMv9SFzSLAx6tbBm85-yYz-578vmofewsYO3GeSOn7DOfZehI-h4AYI4TVeLPJp1t2qRfNFfYVTM6wFRmrN6KpTsUf-i1KDnFjGY0jsdTWvNSWT4ESDCXtOBQ9aWp9AzFdF4KNeN2DiNc5TqpFDECYEYYb8xODhOueWS1n"/>
+<!-- Bottom Gradient Overlay for text legibility -->
+<div class="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-black via-black/50 to-transparent z-20 pointer-events-none"></div>
+<!-- Video Metadata & Author Overlay -->
+<div class="absolute bottom-8 left-10 z-30 w-[65%] flex flex-col gap-4">
+<div class="flex items-center gap-4">
+<img class="w-12 h-12 rounded-full border-2 border-surface-container-highest shadow-md" data-alt="A dramatic black and white headshot of a young male creative professional looking off-camera. The lighting is stark and high-contrast, creating deep shadows that emphasize the structural lines of his face. The styling matches a professional content creator's avatar within a sleek, dark-themed social application, conveying intensity and artistic vision." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCIV1PKtZYRoVkb2NMSoMUWK2b4z4ud3anAMawRZcTvvO65A3fdP_VxZ-SKBjbFmKTXq8K4_5u7hDf1HFGvgAeGcRLain2KtgULNWhuvqWY6DarBw00-1b5W5FbUG65hymKyOYSaKWWhutXHzhRpe9P6PtNySTafG8eHDMWiY3Nd98DFbfRucptBxPPwEiuHqa25JIulogR7d149IxiPQBll9Cj5SbLwJJHMJwyYDdjLt6Xeb3SxzEo_wXQRoy_1ygtQV0BrhnwB-Gc"/>
+<div class="flex flex-col">
+<span class="font-heading text-section-title text-white font-bold tracking-tight">@NeoTokyo_Visuals</span>
+<span class="font-body text-metrics text-white/60">2.4M Followers</span>
+</div>
+<button class="bg-white text-black font-body text-metrics font-bold px-5 py-2 rounded-full hover:scale-105 transition-transform ml-2">Follow</button>
+</div>
+<h1 class="font-feed-title-sm text-feed-title-sm text-white drop-shadow-md">Midnight in the grid. Sector 4 downpour.</h1>
+<p class="font-body text-body text-white/80 line-clamp-2 pr-8 drop-shadow">Capturing the elusive neon reflections during the heaviest monsoon of the year. The entire city feels alive when the grid is this saturated. Shot on RED V-Raptor. #cyberpunk #neon #cinematography #cityscape</p>
+<div class="flex gap-2 mt-2">
+<span class="flex items-center gap-1.5 bg-surface/60 backdrop-blur-xl border border-surface-container-highest rounded-full px-4 py-1.5 font-body text-metrics text-white font-semibold">
+<span class="material-symbols-outlined text-[16px]">music_note</span> Original Sound - Synthwave Beats
+                        </span>
+</div>
+</div>
+<!-- Right Action Rail -->
+<div class="absolute right-8 bottom-16 z-30 flex flex-col gap-6 items-center">
+<button class="flex flex-col items-center gap-1.5 group">
+<div class="w-14 h-14 rounded-full bg-surface/60 backdrop-blur-xl border border-surface-container-highest flex items-center justify-center group-hover:bg-surface-container transition-all group-active:scale-90 shadow-lg">
+<span class="material-symbols-outlined text-[28px] text-secondary-container" style="font-variation-settings: 'FILL' 1;">favorite</span>
+</div>
+<span class="font-body text-metrics text-white font-bold drop-shadow-sm">482k</span>
+</button>
+<button class="flex flex-col items-center gap-1.5 group">
+<div class="w-14 h-14 rounded-full bg-surface/60 backdrop-blur-xl border border-surface-container-highest flex items-center justify-center group-hover:bg-surface-container transition-all group-active:scale-90 shadow-lg">
+<span class="material-symbols-outlined text-[28px] text-white" style="font-variation-settings: 'FILL' 1;">chat_bubble</span>
+</div>
+<span class="font-body text-metrics text-white font-bold drop-shadow-sm">12.5k</span>
+</button>
+<button class="flex flex-col items-center gap-1.5 group">
+<div class="w-14 h-14 rounded-full bg-surface/60 backdrop-blur-xl border border-surface-container-highest flex items-center justify-center group-hover:bg-surface-container transition-all group-active:scale-90 shadow-lg">
+<span class="material-symbols-outlined text-[28px] text-white">bookmark</span>
+</div>
+<span class="font-body text-metrics text-white font-bold drop-shadow-sm">64k</span>
+</button>
+<button class="flex flex-col items-center gap-1.5 group mt-2">
+<div class="w-12 h-12 rounded-full bg-surface-container-high backdrop-blur-xl border border-surface-container-highest flex items-center justify-center group-hover:bg-surface-container-highest transition-all group-active:scale-90">
+<span class="material-symbols-outlined text-[24px] text-white">share</span>
+</div>
+</button>
+</div>
+<!-- Video Progress Bar (Mock) -->
+<div class="absolute bottom-0 left-0 w-full h-1.5 bg-surface-container-highest z-40">
+<div class="h-full bg-tertiary w-1/3 relative">
+<div class="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-[0_0_10px_#00dce5]"></div>
+</div>
+</div>
+</div>
+</main>
+<!-- Right Panel (Comments & Details) -->
+<aside class="w-feed-detail-width h-full shrink-0 flex flex-col bg-surface/80 backdrop-blur-3xl border-l border-surface-container-highest z-10 shadow-[-20px_0_40px_rgba(0,0,0,0.5)]">
+<!-- Panel Header -->
+<div class="h-[72px] shrink-0 flex items-center justify-between px-6 border-b border-surface-container-highest">
+<h2 class="font-heading text-section-title text-on-surface font-bold tracking-tight">Comments <span class="text-on-surface-variant text-sm font-normal ml-1">12,504</span></h2>
+<div class="flex items-center gap-2">
+<button class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined text-[20px]">tune</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined text-[24px]">close</span>
+</button>
+</div>
+</div>
+<!-- Scrollable Comments List -->
+<div class="flex-1 overflow-y-auto p-6 flex flex-col gap-8 custom-scrollbar">
+<!-- Comment Item 1 -->
+<div class="flex gap-4">
+<img class="w-10 h-10 rounded-full shrink-0 border border-surface-container-highest shadow-sm" data-alt="A portrait of a young woman with a warm smile, positioned in front of a slightly blurred outdoor background. The lighting is soft and natural, emphasizing approachability and friendly engagement. This image serves as a high-quality user avatar, matching a premium, modern glassmorphic interface design, adding a human touch to the digital space." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCfqKNkFePsMLBDZYqyGujFrw7aFgKuMbRmsfxl2RU6YwArmAMkd2WUVUnThLXS1IZ06GUZtBEwByaBo_gZorXeQZDI80CTTRv_UVwE8zOrSzQcYoPs610EFhylJndZzJdHfZ_baQVq05Jrr2nIs7XAaPX61Z2ztTTJW_J15FaeL8r-SltWdmFelv1138YY_ZzeCtPYBsTCVFSJ4jCOoKS346foSAxivJV0V-VKDfC87OD2aNJvmJUGF28t-s9gS2MaTUjbEeLcHAmt"/>
+<div class="flex flex-col gap-1.5 w-full">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-2">
+<span class="font-body text-metrics text-on-surface font-bold">Elena Rostova</span>
+<span class="font-body text-metrics text-on-surface-variant font-normal">2h</span>
+</div>
+<button class="text-on-surface-variant hover:text-on-surface transition-colors"><span class="material-symbols-outlined text-[18px]">more_horiz</span></button>
+</div>
+<p class="font-body text-body text-on-surface leading-relaxed">The color grading on this is spectacular. Did you use a specific LUT for those neon magentas, or was it entirely manually graded in resolve?</p>
+<div class="flex items-center gap-5 mt-1">
+<button class="flex items-center gap-1.5 text-on-surface-variant hover:text-secondary-container transition-colors group">
+<span class="material-symbols-outlined text-[18px] group-hover:scale-110 transition-transform">favorite</span>
+<span class="font-body text-metrics font-normal">1.2k</span>
+</button>
+<button class="flex items-center gap-1.5 text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined text-[18px]">thumb_down</span>
+</button>
+<button class="font-body text-metrics text-on-surface-variant hover:text-on-surface transition-colors font-semibold">Reply</button>
+</div>
+</div>
+</div>
+<!-- Comment Item 2 (Nested Reply via visual indentation) -->
+<div class="flex gap-4 pl-14 relative">
+<!-- Tree connecting line -->
+<div class="absolute left-9 top-0 bottom-8 w-[2px] bg-surface-container-highest rounded-full"></div>
+<div class="absolute left-9 top-5 w-4 h-[2px] bg-surface-container-highest rounded-full"></div>
+<img class="w-8 h-8 rounded-full shrink-0 border border-tertiary/50 shadow-[0_0_10px_rgba(0,220,229,0.2)]" data-alt="A dramatic black and white headshot of a young male creative professional looking off-camera. The lighting is stark and high-contrast, creating deep shadows that emphasize the structural lines of his face. The styling matches a professional content creator's avatar within a sleek, dark-themed social application, conveying intensity and artistic vision." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCRykmTQapdwWxEn7aj2ZWySXn6-vKDNUef9rBSrbj-vaoLSdkOejB5ZhA1SAE6Hchx7c5DcrARw4qUmpXV07Ivks85JMJjudo-5pK8Cjm3F4c72BU7nAVXHH75aycxQ6h81RXVqnmCd1lZxnT-AymFxtysHadlZdnQpjMXTrmslAK4HG00IbSbzR0wQO9RQBoq2cBn_Nbz4tsBWlbvyL9QqUyWP4nFHfBwZG_yrBSa72zPt3Wti3ufaPNQIwoJRH0pPhMmjTmqY1g4"/>
+<div class="flex flex-col gap-1.5 w-full">
+<div class="flex items-center gap-2">
+<span class="font-body text-[10px] text-background bg-tertiary px-1.5 py-0.5 rounded font-black tracking-wider uppercase">Creator</span>
+<span class="font-body text-metrics text-on-surface font-bold">NeoTokyo_Visuals</span>
+<span class="font-body text-metrics text-on-surface-variant font-normal">1h</span>
+</div>
+<p class="font-body text-body text-on-surface leading-relaxed">Thanks Elena! Mostly manual nodes in Resolve. I used a custom film emulation base, but pushed the hue vs hue curves pretty aggressively to isolate those pinks.</p>
+<div class="flex items-center gap-5 mt-1">
+<button class="flex items-center gap-1.5 text-secondary-container transition-colors group">
+<span class="material-symbols-outlined text-[18px] group-hover:scale-110 transition-transform" style="font-variation-settings: 'FILL' 1;">favorite</span>
+<span class="font-body text-metrics font-bold">342</span>
+</button>
+<button class="font-body text-metrics text-on-surface-variant hover:text-on-surface transition-colors font-semibold">Reply</button>
+</div>
+</div>
+</div>
+<!-- Comment Item 3 -->
+<div class="flex gap-4">
+<img class="w-10 h-10 rounded-full shrink-0 border border-surface-container-highest shadow-sm" data-alt="A portrait of a confident young man looking directly at the camera, lit with warm, cinematic studio lights that create strong contrast and mood. The deep shadows and crisp highlights give the image a high-end, dramatic feel. This avatar perfectly suits a professional content management interface operating in a dark, immersive aesthetic mode, projecting authority and modern style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB7uaOE97IUWoZ4UATBaoSTyBJZUmaVDIznnBD7dhe-84PxZmlZ1V8lAgzaub9vACzqMryk0r96bzhbWPWr4VFjb6IQKxipytjB0_hO7yATBoAmjoMitTHcKYf-KgpXjA0_I4DP8Kym-JYSOhbsDxtiwXkZk1KHPGMerpuvZm24J8JkfExcRH-_8MFsLcGC6tkPin9XxwLp41Hu7yaTCJ6G2--rRM8JW2W9wtB0kXH3sn6754xv94qNtJNdCnyg7cpmz7tbIePycKd5"/>
+<div class="flex flex-col gap-1.5 w-full">
+<div class="flex justify-between items-start">
+<div class="flex items-center gap-2">
+<span class="font-body text-metrics text-on-surface font-bold">Marcus_V</span>
+<span class="font-body text-metrics text-on-surface-variant font-normal">4h</span>
+</div>
+</div>
+<p class="font-body text-body text-on-surface leading-relaxed">I've lived in this city for 10 years and I've never seen it look this magical. You have a crazy eye for finding the right puddles man 😂</p>
+<div class="flex items-center gap-5 mt-1">
+<button class="flex items-center gap-1.5 text-on-surface-variant hover:text-secondary-container transition-colors group">
+<span class="material-symbols-outlined text-[18px] group-hover:scale-110 transition-transform">favorite</span>
+<span class="font-body text-metrics font-normal">89</span>
+</button>
+<button class="font-body text-metrics text-on-surface-variant hover:text-on-surface transition-colors font-semibold">Reply</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Fixed Comment Input Area -->
+<div class="p-5 bg-background/80 backdrop-blur-3xl border-t border-surface-container-highest shrink-0">
+<div class="flex items-center gap-3 bg-surface-container border border-surface-container-highest rounded-2xl px-4 py-2.5 focus-within:border-primary/50 focus-within:bg-surface-container-high transition-all shadow-inner">
+<img class="w-7 h-7 rounded-full shrink-0 opacity-80" data-alt="A close-up portrait of a young person in a brightly lit studio setting, creating a clean and modern aesthetic. The lighting is soft and even, highlighting natural skin tones. The image serves as a small user profile avatar indicating the current user's session within a comment input field, complementing a minimalistic glassmorphic design system." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDkVKBayElxwc5dZXnGlToK0w94B03CcxH12LQFia4XlEpj4t9ESgTObPYQfziUATUfn0OP0MJLNwQNvE6xzGgCnGbN1XxLSQgJpo9V7cHhdHNePmwe_Cx8Sxvl_6_g80c6B9f1i97v6azVo2kODIIhecLpQNne7pb_RDWi62waLZL0BBCOihi_toorkdAFfiBsZCbc9TJqOgYTq-hSQhFDkvc1zYfW76MKQvTGmu9_jfo1CYCUnERLtssVdODGxo8mDvUHTRaJA9YN"/>
+<input class="bg-transparent border-none outline-none text-on-surface font-body text-body w-full placeholder:text-on-surface-variant focus:ring-0 px-0" placeholder="Add a comment..." type="text"/>
+<button class="w-8 h-8 flex items-center justify-center rounded-full bg-primary hover:bg-primary-container text-on-primary transition-colors shrink-0 shadow-md">
+<span class="material-symbols-outlined text-[16px]">send</span>
+</button>
+</div>
+</div>
+</aside>
+</div>
+</body></html>
