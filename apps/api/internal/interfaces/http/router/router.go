@@ -1,16 +1,19 @@
 package interfaceshttprouter
 
 import (
-	"database/sql"
 	applicationaccount "GCFeed/internal/application/account"
+	applicationfeed "GCFeed/internal/application/feed"
 	applicationvideo "GCFeed/internal/application/video"
 	infraconfig "GCFeed/internal/infra/config"
 	infrajwt "GCFeed/internal/infra/jwt"
 	infraaccount "GCFeed/internal/infra/persistence/account"
+	infrafeed "GCFeed/internal/infra/persistence/feed"
 	infravideo "GCFeed/internal/infra/persistence/video"
 	interfaceshttpaccount "GCFeed/internal/interfaces/http/account"
+	interfaceshttpfeed "GCFeed/internal/interfaces/http/feed"
 	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
 	interfaceshttpvideo "GCFeed/internal/interfaces/http/video"
+	"database/sql"
 
 	"github.com/gin-gonic/gin"
 	gormmysql "gorm.io/driver/mysql"
@@ -25,7 +28,12 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 		return err
 	}
 
-	if err := gormDB.AutoMigrate(&infraaccount.UserModel{}, &infravideo.VideoModel{}); err != nil {
+	if err := gormDB.AutoMigrate(
+		&infraaccount.UserModel{},
+		&infravideo.VideoModel{},
+		&infrafeed.FeedCursorModel{},
+		&infrafeed.FeedViewEventModel{},
+	); err != nil {
 		return err
 	}
 
@@ -40,6 +48,9 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	videoRepo := infravideo.New(gormDB)
 	videoService := applicationvideo.NewService(videoRepo)
 	videoHandler := interfaceshttpvideo.NewHandler(videoService)
+	feedRepo := infrafeed.New(gormDB)
+	feedService := applicationfeed.NewService(feedRepo)
+	feedHandler := interfaceshttpfeed.NewHandler(feedService)
 
 	g.GET("/health", HealthCheck)
 
@@ -62,6 +73,11 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	videos.DELETE("/:videoId", authMiddleware, videoHandler.Delete)
 
 	api.GET("/users/:userId/videos", videoHandler.ListByAuthor)
+
+	feed := api.Group("/feed")
+	feed.GET("/time", feedHandler.Time)
+	feed.GET("/refresh", feedHandler.Refresh)
+	feed.POST("/view-events", feedHandler.ReportViewEvent)
 
 	return nil
 }
