@@ -12,6 +12,7 @@ import (
 	interfaceshttpaccount "GCFeed/internal/interfaces/http/account"
 	interfaceshttpfeed "GCFeed/internal/interfaces/http/feed"
 	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
+	interfaceshttpupload "GCFeed/internal/interfaces/http/upload"
 	interfaceshttpvideo "GCFeed/internal/interfaces/http/video"
 	"database/sql"
 
@@ -46,8 +47,10 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	feedRepo := infrafeed.New(gormDB)
 	feedService := applicationfeed.NewService(feedRepo)
 	feedHandler := interfaceshttpfeed.NewHandler(feedService)
+	uploadHandler := interfaceshttpupload.NewHandler("./uploads")
 
 	g.GET("/health", HealthCheck)
+	g.Static("/uploads", "./uploads")
 
 	authMiddleware := interfaceshttpmiddleware.NewJWTAuth(jwtManager)
 	api := g.Group("/api")
@@ -66,6 +69,9 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	videos.GET("/mine", authMiddleware, videoHandler.ListMine)
 	videos.GET("/:videoId", videoHandler.Get)
 	videos.DELETE("/:videoId", authMiddleware, videoHandler.Delete)
+
+	uploads := api.Group("/uploads", authMiddleware)
+	uploads.POST("", uploadHandler.Create)
 
 	api.GET("/users/:userId/videos", videoHandler.ListByAuthor)
 
