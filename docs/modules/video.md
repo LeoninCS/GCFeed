@@ -21,6 +21,7 @@
 | `id` | BIGINT | PK | 视频ID |
 | `author_id` | BIGINT | NOT NULL | 作者ID |
 | `title` | VARCHAR(128) | NOT NULL | 标题 |
+| `description` | VARCHAR(512) | NULLABLE | 视频简介 |
 | `media_url` | VARCHAR(512) | NOT NULL | 视频地址 |
 | `cover_url` | VARCHAR(512) | NOT NULL | 封面地址 |
 | `status` | TINYINT | NOT NULL, DEFAULT 2 | 1草稿/2上线/3下架/4删除 |

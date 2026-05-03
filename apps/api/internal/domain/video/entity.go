@@ -12,6 +12,7 @@ const (
 	StatusDeleted   = 4
 
 	MaxTitleLength          = 128
+	MaxDescriptionLength    = 512
 	MaxIdempotencyKeyLength = 128
 )
 
@@ -19,6 +20,7 @@ type Video struct {
 	ID             int64
 	AuthorID       int64
 	Title          string
+	Description    string
 	MediaURL       string
 	CoverURL       string
 	Status         int
@@ -31,12 +33,13 @@ type Video struct {
 	IdempotencyKey string
 }
 
-func NewPublished(authorID int64, title, mediaURL, coverURL, idempotencyKey string) (*Video, error) {
+func NewPublished(authorID int64, title, description, mediaURL, coverURL, idempotencyKey string) (*Video, error) {
 	if authorID <= 0 {
 		return nil, ErrInvalidAuthorID
 	}
 
 	title = strings.TrimSpace(title)
+	description = strings.TrimSpace(description)
 	mediaURL = strings.TrimSpace(mediaURL)
 	coverURL = strings.TrimSpace(coverURL)
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
@@ -46,6 +49,9 @@ func NewPublished(authorID int64, title, mediaURL, coverURL, idempotencyKey stri
 	}
 	if len(title) > MaxTitleLength {
 		return nil, ErrTitleTooLong
+	}
+	if len(description) > MaxDescriptionLength {
+		return nil, ErrDescriptionTooLong
 	}
 	if mediaURL == "" {
 		return nil, ErrEmptyMediaURL
@@ -61,6 +67,7 @@ func NewPublished(authorID int64, title, mediaURL, coverURL, idempotencyKey stri
 	return &Video{
 		AuthorID:       authorID,
 		Title:          title,
+		Description:    description,
 		MediaURL:       mediaURL,
 		CoverURL:       coverURL,
 		Status:         StatusPublished,
@@ -73,6 +80,7 @@ func RestoreVideo(
 	id int64,
 	authorID int64,
 	title string,
+	description string,
 	mediaURL string,
 	coverURL string,
 	status int,
@@ -85,6 +93,7 @@ func RestoreVideo(
 	idempotencyKey string,
 ) *Video {
 	title = strings.TrimSpace(title)
+	description = strings.TrimSpace(description)
 	mediaURL = strings.TrimSpace(mediaURL)
 	coverURL = strings.TrimSpace(coverURL)
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
@@ -96,6 +105,7 @@ func RestoreVideo(
 		ID:             id,
 		AuthorID:       authorID,
 		Title:          title,
+		Description:    description,
 		MediaURL:       mediaURL,
 		CoverURL:       coverURL,
 		Status:         status,

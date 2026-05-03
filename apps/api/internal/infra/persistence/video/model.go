@@ -6,6 +6,7 @@ type VideoModel struct {
 	ID             int64      `gorm:"column:id;primaryKey;autoIncrement"`
 	AuthorID       int64      `gorm:"column:author_id;not null;index:idx_author_status,priority:1;uniqueIndex:uk_author_idempotency,priority:1"`
 	Title          string     `gorm:"column:title;size:128;not null"`
+	Description    string     `gorm:"column:description;size:512"`
 	MediaURL       string     `gorm:"column:media_url;size:512;not null"`
 	CoverURL       string     `gorm:"column:cover_url;size:512;not null"`
 	Status         int        `gorm:"column:status;type:tinyint;not null;default:2;index:idx_author_status,priority:2;index:idx_status_published,priority:1"`

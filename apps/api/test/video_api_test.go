@@ -24,6 +24,7 @@ type videoAPIResponse struct {
 	ID            int64      `json:"id"`
 	AuthorID      int64      `json:"author_id"`
 	Title         string     `json:"title"`
+	Description   string     `json:"description"`
 	MediaURL      string     `json:"media_url"`
 	CoverURL      string     `json:"cover_url"`
 	Status        int        `json:"status"`
@@ -164,7 +165,7 @@ func TestVideoAPIFlow(t *testing.T) {
 		router,
 		http.MethodPost,
 		"/api/videos",
-		`{"title":"first video","media_url":"https://example.com/video.mp4","cover_url":"https://example.com/cover.jpg"}`,
+		`{"title":"first video","description":"hello timeline","media_url":"https://example.com/video.mp4","cover_url":"https://example.com/cover.jpg"}`,
 		token,
 		"create-video-1",
 	)
@@ -175,7 +176,7 @@ func TestVideoAPIFlow(t *testing.T) {
 	if created.ID == 0 || created.AuthorID != 42 || created.Status != domainvideo.StatusPublished {
 		t.Fatalf("unexpected create response: %+v", created)
 	}
-	if created.Title != "first video" || created.MediaURL == "" || created.CoverURL == "" || created.PublishedAt == nil {
+	if created.Title != "first video" || created.Description != "hello timeline" || created.MediaURL == "" || created.CoverURL == "" || created.PublishedAt == nil {
 		t.Fatalf("unexpected create response: %+v", created)
 	}
 
@@ -183,7 +184,7 @@ func TestVideoAPIFlow(t *testing.T) {
 		router,
 		http.MethodPost,
 		"/api/videos",
-		`{"title":"changed title","media_url":"https://example.com/changed.mp4","cover_url":"https://example.com/changed.jpg"}`,
+		`{"title":"changed title","description":"changed description","media_url":"https://example.com/changed.mp4","cover_url":"https://example.com/changed.jpg"}`,
 		token,
 		"create-video-1",
 	)
@@ -243,7 +244,7 @@ func TestVideoAPIValidation(t *testing.T) {
 		router,
 		http.MethodPost,
 		"/api/videos",
-		`{"title":"first video","media_url":"https://example.com/video.mp4","cover_url":"https://example.com/cover.jpg"}`,
+		`{"title":"first video","description":"hello timeline","media_url":"https://example.com/video.mp4","cover_url":"https://example.com/cover.jpg"}`,
 		"",
 	)
 	requireStatus(t, unauthorizedCreateResponse, http.StatusUnauthorized)
@@ -267,7 +268,7 @@ func TestVideoAPIValidation(t *testing.T) {
 		router,
 		http.MethodPost,
 		"/api/videos",
-		`{"title":"owned video","media_url":"https://example.com/video.mp4","cover_url":"https://example.com/cover.jpg"}`,
+		`{"title":"owned video","description":"owned description","media_url":"https://example.com/video.mp4","cover_url":"https://example.com/cover.jpg"}`,
 		token,
 	)
 	requireStatus(t, createResponse, http.StatusCreated)

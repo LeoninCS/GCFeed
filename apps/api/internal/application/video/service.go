@@ -24,7 +24,7 @@ func NewService(repo domainvideo.Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) CreatePublished(ctx context.Context, authorID int64, title, mediaURL, coverURL, idempotencyKey string) (*CreateResult, error) {
+func (s *Service) CreatePublished(ctx context.Context, authorID int64, title, description, mediaURL, coverURL, idempotencyKey string) (*CreateResult, error) {
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if len(idempotencyKey) > domainvideo.MaxIdempotencyKeyLength {
 		return nil, domainvideo.ErrIdempotencyKeyTooLong
@@ -40,7 +40,7 @@ func (s *Service) CreatePublished(ctx context.Context, authorID int64, title, me
 		}
 	}
 
-	video, err := domainvideo.NewPublished(authorID, title, mediaURL, coverURL, idempotencyKey)
+	video, err := domainvideo.NewPublished(authorID, title, description, mediaURL, coverURL, idempotencyKey)
 	if err != nil {
 		return nil, err
 	}

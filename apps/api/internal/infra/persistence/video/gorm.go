@@ -21,6 +21,7 @@ func (r *Repository) Save(ctx context.Context, video *domainvideo.Video) error {
 	model := VideoModel{
 		AuthorID:       video.AuthorID,
 		Title:          video.Title,
+		Description:    video.Description,
 		MediaURL:       video.MediaURL,
 		CoverURL:       video.CoverURL,
 		Status:         video.Status,
@@ -133,6 +134,7 @@ func restoreVideo(model VideoModel) *domainvideo.Video {
 		model.ID,
 		model.AuthorID,
 		model.Title,
+		model.Description,
 		model.MediaURL,
 		model.CoverURL,
 		model.Status,

@@ -3,15 +3,17 @@ package interfaceshttpvideo
 import "time"
 
 type CreateVideoRequest struct {
-	Title    string `json:"title"`
-	MediaURL string `json:"media_url"`
-	CoverURL string `json:"cover_url"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	MediaURL    string `json:"media_url"`
+	CoverURL    string `json:"cover_url"`
 }
 
 type videoResponse struct {
 	ID            int64      `json:"id"`
 	AuthorID      int64      `json:"author_id"`
 	Title         string     `json:"title"`
+	Description   string     `json:"description"`
 	MediaURL      string     `json:"media_url"`
 	CoverURL      string     `json:"cover_url"`
 	Status        int        `json:"status"`
