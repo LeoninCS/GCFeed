@@ -13,25 +13,18 @@ import (
 const defaultFeedLimit = 20
 
 var ErrLoadFeedFailed = errors.New("failed to load feed")
-var ErrSaveViewEventFailed = errors.New("failed to save view event")
-var ErrLoadViewEventFailed = errors.New("failed to load view event")
 
 type Service struct {
 	repo domainfeed.Repository
 }
 
-type TimeFeedResult struct {
+type TimelineFeedResult struct {
 	Items      []*domainfeed.FeedItem
 	NextCursor string
 	HasMore    bool
 }
 
-type ViewEventResult struct {
-	Event   *domainfeed.ViewEvent
-	Created bool
-}
-
-type timeCursorPayload struct {
+type timelineCursorPayload struct {
 	PublishedAt string `json:"published_at"`
 	VideoID     int64  `json:"video_id"`
 }
@@ -40,14 +33,14 @@ func NewService(repo domainfeed.Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) GetTimeFeed(ctx context.Context, cursor string, limit int) (*TimeFeedResult, error) {
-	parsedCursor, err := parseTimeCursor(cursor)
+func (s *Service) GetTimelineFeed(ctx context.Context, cursor string, limit int) (*TimelineFeedResult, error) {
+	parsedCursor, err := parseTimelineCursor(cursor)
 	if err != nil {
 		return nil, err
 	}
 	limit = normalizeLimit(limit)
 
-	items, err := s.repo.ListTimeFeed(ctx, parsedCursor, limit+1)
+	items, err := s.repo.ListTimelineFeed(ctx, parsedCursor, limit+1)
 	if err != nil {
 		return nil, ErrLoadFeedFailed
 	}
@@ -59,56 +52,21 @@ func (s *Service) GetTimeFeed(ctx context.Context, cursor string, limit int) (*T
 
 	nextCursor := ""
 	if len(items) > 0 {
-		nextCursor = encodeTimeCursor(&domainfeed.TimeCursor{
+		nextCursor = encodeTimelineCursor(&domainfeed.TimelineCursor{
 			PublishedAt: items[len(items)-1].PublishedAt,
 			VideoID:     items[len(items)-1].VideoID,
 		})
 	}
 
-	return &TimeFeedResult{
+	return &TimelineFeedResult{
 		Items:      items,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
 	}, nil
 }
 
-func (s *Service) RefreshTimeFeed(ctx context.Context, limit int) (*TimeFeedResult, error) {
-	return s.GetTimeFeed(ctx, "", limit)
-}
-
-func (s *Service) ReportViewEvent(ctx context.Context, userID *int64, visitorID string, videoID int64, eventType string, watchMS int, idempotencyKey string) (*ViewEventResult, error) {
-	idempotencyKey = strings.TrimSpace(idempotencyKey)
-	if len(idempotencyKey) > domainfeed.MaxIdempotencyKeyLength {
-		return nil, domainfeed.ErrIdempotencyKeyTooLong
-	}
-
-	if idempotencyKey != "" {
-		existing, err := s.repo.FindViewEventByIdempotencyKey(ctx, idempotencyKey)
-		if err == nil {
-			return &ViewEventResult{Event: existing, Created: false}, nil
-		}
-		if !errors.Is(err, domainfeed.ErrViewEventNotFound) {
-			return nil, ErrLoadViewEventFailed
-		}
-	}
-
-	event, err := domainfeed.NewViewEvent(userID, visitorID, videoID, eventType, watchMS, idempotencyKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := s.repo.SaveViewEvent(ctx, event); err != nil {
-		if idempotencyKey != "" && errors.Is(err, domainfeed.ErrDuplicateIdempotencyKey) {
-			existing, loadErr := s.repo.FindViewEventByIdempotencyKey(ctx, idempotencyKey)
-			if loadErr == nil {
-				return &ViewEventResult{Event: existing, Created: false}, nil
-			}
-			return nil, ErrLoadViewEventFailed
-		}
-		return nil, ErrSaveViewEventFailed
-	}
-
-	return &ViewEventResult{Event: event, Created: true}, nil
+func (s *Service) RefreshTimelineFeed(ctx context.Context, limit int) (*TimelineFeedResult, error) {
+	return s.GetTimelineFeed(ctx, "", limit)
 }
 
 func normalizeLimit(limit int) int {
@@ -121,7 +79,7 @@ func normalizeLimit(limit int) int {
 	return limit
 }
 
-func parseTimeCursor(raw string) (*domainfeed.TimeCursor, error) {
+func parseTimelineCursor(raw string) (*domainfeed.TimelineCursor, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
@@ -135,7 +93,7 @@ func parseTimeCursor(raw string) (*domainfeed.TimeCursor, error) {
 		}
 	}
 
-	var payload timeCursorPayload
+	var payload timelineCursorPayload
 	if err := json.Unmarshal(content, &payload); err != nil {
 		return nil, domainfeed.ErrInvalidCursor
 	}
@@ -145,18 +103,18 @@ func parseTimeCursor(raw string) (*domainfeed.TimeCursor, error) {
 		return nil, domainfeed.ErrInvalidCursor
 	}
 
-	return &domainfeed.TimeCursor{
+	return &domainfeed.TimelineCursor{
 		PublishedAt: publishedAt,
 		VideoID:     payload.VideoID,
 	}, nil
 }
 
-func encodeTimeCursor(cursor *domainfeed.TimeCursor) string {
+func encodeTimelineCursor(cursor *domainfeed.TimelineCursor) string {
 	if cursor == nil || cursor.VideoID <= 0 || cursor.PublishedAt.IsZero() {
 		return ""
 	}
 
-	content, err := json.Marshal(timeCursorPayload{
+	content, err := json.Marshal(timelineCursorPayload{
 		PublishedAt: cursor.PublishedAt.UTC().Format(time.RFC3339Nano),
 		VideoID:     cursor.VideoID,
 	})

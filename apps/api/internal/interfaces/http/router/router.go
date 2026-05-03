@@ -28,12 +28,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 		return err
 	}
 
-	if err := gormDB.AutoMigrate(
-		&infraaccount.UserModel{},
-		&infravideo.VideoModel{},
-		&infrafeed.FeedCursorModel{},
-		&infrafeed.FeedViewEventModel{},
-	); err != nil {
+	if err := gormDB.AutoMigrate(&infraaccount.UserModel{}, &infravideo.VideoModel{}); err != nil {
 		return err
 	}
 
@@ -75,9 +70,8 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	api.GET("/users/:userId/videos", videoHandler.ListByAuthor)
 
 	feed := api.Group("/feed")
-	feed.GET("/time", feedHandler.Time)
+	feed.GET("/timeline", feedHandler.Timeline)
 	feed.GET("/refresh", feedHandler.Refresh)
-	feed.POST("/view-events", feedHandler.ReportViewEvent)
 
 	return nil
 }

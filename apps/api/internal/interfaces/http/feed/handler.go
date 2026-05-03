@@ -19,20 +19,20 @@ func NewHandler(service *applicationfeed.Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) Time(c *gin.Context) {
+func (h *Handler) Timeline(c *gin.Context) {
 	limit, err := parseLimit(c.Query("limit"))
 	if err != nil {
 		writeFeedError(c, err)
 		return
 	}
 
-	result, err := h.service.GetTimeFeed(c.Request.Context(), c.Query("cursor"), limit)
+	result, err := h.service.GetTimelineFeed(c.Request.Context(), c.Query("cursor"), limit)
 	if err != nil {
 		writeFeedError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, timeFeedResponseFromResult(result))
+	c.JSON(http.StatusOK, timelineFeedResponseFromResult(result))
 }
 
 func (h *Handler) Refresh(c *gin.Context) {
@@ -42,41 +42,13 @@ func (h *Handler) Refresh(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.RefreshTimeFeed(c.Request.Context(), limit)
+	result, err := h.service.RefreshTimelineFeed(c.Request.Context(), limit)
 	if err != nil {
 		writeFeedError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, timeFeedResponseFromResult(result))
-}
-
-func (h *Handler) ReportViewEvent(c *gin.Context) {
-	var req viewEventRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
-
-	result, err := h.service.ReportViewEvent(
-		c.Request.Context(),
-		nil,
-		req.VisitorID,
-		req.VideoID,
-		req.EventType,
-		req.WatchMS,
-		c.GetHeader("Idempotency-Key"),
-	)
-	if err != nil {
-		writeFeedError(c, err)
-		return
-	}
-
-	status := http.StatusCreated
-	if !result.Created {
-		status = http.StatusOK
-	}
-	c.JSON(status, viewEventResponseFromDomain(result.Event))
+	c.JSON(http.StatusOK, timelineFeedResponseFromResult(result))
 }
 
 func parseLimit(raw string) (int, error) {
@@ -92,36 +64,28 @@ func parseLimit(raw string) (int, error) {
 	return limit, nil
 }
 
-func timeFeedResponseFromResult(result *applicationfeed.TimeFeedResult) timeFeedResponse {
+func timelineFeedResponseFromResult(result *applicationfeed.TimelineFeedResult) timelineFeedResponse {
 	items := make([]feedItemResponse, 0, len(result.Items))
 	for _, item := range result.Items {
 		items = append(items, feedItemResponse{
-			VideoID:       item.VideoID,
-			AuthorID:      item.AuthorID,
-			Title:         item.Title,
-			MediaURL:      item.MediaURL,
-			CoverURL:      item.CoverURL,
-			LikeCount:     item.LikeCount,
-			CommentCount:  item.CommentCount,
-			FavoriteCount: item.FavoriteCount,
-			PublishedAt:   item.PublishedAt,
+			VideoID:         item.VideoID,
+			AuthorID:        item.AuthorID,
+			AuthorNickname:  item.AuthorNickname,
+			AuthorAvatarURL: item.AuthorAvatarURL,
+			Title:           item.Title,
+			Description:     item.Description,
+			MediaURL:        item.MediaURL,
+			CoverURL:        item.CoverURL,
+			LikeCount:       item.LikeCount,
+			CommentCount:    item.CommentCount,
+			FavoriteCount:   item.FavoriteCount,
+			PublishedAt:     item.PublishedAt,
 		})
 	}
-	return timeFeedResponse{
+	return timelineFeedResponse{
 		Items:      items,
 		NextCursor: result.NextCursor,
 		HasMore:    result.HasMore,
-	}
-}
-
-func viewEventResponseFromDomain(event *domainfeed.ViewEvent) viewEventResponse {
-	return viewEventResponse{
-		ID:        event.ID,
-		VisitorID: event.VisitorID,
-		VideoID:   event.VideoID,
-		EventType: event.EventType,
-		WatchMS:   event.WatchMS,
-		CreatedAt: event.CreatedAt,
 	}
 }
 
@@ -134,12 +98,6 @@ func writeFeedError(c *gin.Context, err error) {
 }
 
 func isBadRequestError(err error) bool {
-	return errors.Is(err, domainfeed.ErrInvalidVideoID) ||
-		errors.Is(err, domainfeed.ErrInvalidLimit) ||
-		errors.Is(err, domainfeed.ErrInvalidCursor) ||
-		errors.Is(err, domainfeed.ErrEmptyEventType) ||
-		errors.Is(err, domainfeed.ErrInvalidEventType) ||
-		errors.Is(err, domainfeed.ErrInvalidWatchMS) ||
-		errors.Is(err, domainfeed.ErrVisitorIDTooLong) ||
-		errors.Is(err, domainfeed.ErrIdempotencyKeyTooLong)
+	return errors.Is(err, domainfeed.ErrInvalidLimit) ||
+		errors.Is(err, domainfeed.ErrInvalidCursor)
 }

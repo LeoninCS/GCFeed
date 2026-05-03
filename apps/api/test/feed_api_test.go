@@ -1,10 +1,8 @@
 package test
 
 import (
-	"bytes"
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"sort"
 	"sync"
 	"testing"
@@ -24,44 +22,30 @@ type feedAPIResponse struct {
 }
 
 type feedItemAPIResponse struct {
-	VideoID       int64     `json:"video_id"`
-	AuthorID      int64     `json:"author_id"`
-	Title         string    `json:"title"`
-	MediaURL      string    `json:"media_url"`
-	CoverURL      string    `json:"cover_url"`
-	LikeCount     int       `json:"like_count"`
-	CommentCount  int       `json:"comment_count"`
-	FavoriteCount int       `json:"favorite_count"`
-	PublishedAt   time.Time `json:"published_at"`
-}
-
-type viewEventAPIResponse struct {
-	ID        int64     `json:"id"`
-	VisitorID string    `json:"visitor_id"`
-	VideoID   int64     `json:"video_id"`
-	EventType string    `json:"event_type"`
-	WatchMS   int       `json:"watch_ms"`
-	CreatedAt time.Time `json:"created_at"`
+	VideoID         int64     `json:"video_id"`
+	AuthorID        int64     `json:"author_id"`
+	AuthorNickname  string    `json:"author_nickname"`
+	AuthorAvatarURL string    `json:"author_avatar_url"`
+	Title           string    `json:"title"`
+	Description     string    `json:"description"`
+	MediaURL        string    `json:"media_url"`
+	CoverURL        string    `json:"cover_url"`
+	LikeCount       int       `json:"like_count"`
+	CommentCount    int       `json:"comment_count"`
+	FavoriteCount   int       `json:"favorite_count"`
+	PublishedAt     time.Time `json:"published_at"`
 }
 
 type memoryFeedRepo struct {
-	mu          sync.Mutex
-	items       []*domainfeed.FeedItem
-	nextEventID int64
-	eventsByID  map[int64]*domainfeed.ViewEvent
-	eventsByKey map[string]int64
+	mu    sync.Mutex
+	items []*domainfeed.FeedItem
 }
 
 func newMemoryFeedRepo(items []*domainfeed.FeedItem) *memoryFeedRepo {
-	return &memoryFeedRepo{
-		items:       items,
-		nextEventID: 1,
-		eventsByID:  map[int64]*domainfeed.ViewEvent{},
-		eventsByKey: map[string]int64{},
-	}
+	return &memoryFeedRepo{items: items}
 }
 
-func (r *memoryFeedRepo) ListTimeFeed(ctx context.Context, cursor *domainfeed.TimeCursor, limit int) ([]*domainfeed.FeedItem, error) {
+func (r *memoryFeedRepo) ListTimelineFeed(ctx context.Context, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -84,41 +68,10 @@ func (r *memoryFeedRepo) ListTimeFeed(ctx context.Context, cursor *domainfeed.Ti
 	return items[:limit], nil
 }
 
-func (r *memoryFeedRepo) SaveViewEvent(ctx context.Context, event *domainfeed.ViewEvent) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if event.IdempotencyKey != "" {
-		if _, exists := r.eventsByKey[event.IdempotencyKey]; exists {
-			return domainfeed.ErrDuplicateIdempotencyKey
-		}
-	}
-
-	event.ID = r.nextEventID
-	r.nextEventID++
-	event.CreatedAt = time.Now()
-	r.eventsByID[event.ID] = cloneViewEvent(event)
-	if event.IdempotencyKey != "" {
-		r.eventsByKey[event.IdempotencyKey] = event.ID
-	}
-	return nil
-}
-
-func (r *memoryFeedRepo) FindViewEventByIdempotencyKey(ctx context.Context, key string) (*domainfeed.ViewEvent, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	id, exists := r.eventsByKey[key]
-	if !exists {
-		return nil, domainfeed.ErrViewEventNotFound
-	}
-	return cloneViewEvent(r.eventsByID[id]), nil
-}
-
 func TestFeedAPIFlow(t *testing.T) {
 	router := newFeedRouter(seedFeedItems())
 
-	firstPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed/time?limit=2", "", "")
+	firstPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed/timeline?limit=2", "", "")
 	requireStatus(t, firstPageResponse, http.StatusOK)
 
 	var firstPage feedAPIResponse
@@ -126,11 +79,14 @@ func TestFeedAPIFlow(t *testing.T) {
 	if len(firstPage.Items) != 2 || firstPage.Items[0].VideoID != 3 || firstPage.Items[1].VideoID != 2 {
 		t.Fatalf("unexpected first page response: %+v", firstPage)
 	}
+	if firstPage.Items[0].AuthorNickname != "new author" || firstPage.Items[0].AuthorAvatarURL != "https://example.com/avatar-3.jpg" || firstPage.Items[0].Description != "new description" {
+		t.Fatalf("unexpected first page author response: %+v", firstPage.Items[0])
+	}
 	if firstPage.NextCursor == "" || !firstPage.HasMore {
 		t.Fatalf("unexpected first page cursor: %+v", firstPage)
 	}
 
-	secondPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed/time?cursor="+firstPage.NextCursor+"&limit=2", "", "")
+	secondPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed/timeline?cursor="+firstPage.NextCursor+"&limit=2", "", "")
 	requireStatus(t, secondPageResponse, http.StatusOK)
 
 	var secondPage feedAPIResponse
@@ -147,73 +103,16 @@ func TestFeedAPIFlow(t *testing.T) {
 	if len(refresh.Items) != 1 || refresh.Items[0].VideoID != 3 || !refresh.HasMore {
 		t.Fatalf("unexpected refresh response: %+v", refresh)
 	}
-
-	eventResponse := performFeedJSONRequest(
-		router,
-		http.MethodPost,
-		"/api/feed/view-events",
-		`{"visitor_id":"visitor-001","video_id":3,"event_type":"view","watch_ms":3000}`,
-		"event-1",
-	)
-	requireStatus(t, eventResponse, http.StatusCreated)
-
-	var event viewEventAPIResponse
-	decodeJSON(t, eventResponse, &event)
-	if event.ID == 0 || event.VisitorID != "visitor-001" || event.VideoID != 3 || event.EventType != domainfeed.EventTypeView || event.WatchMS != 3000 {
-		t.Fatalf("unexpected event response: %+v", event)
-	}
-
-	replayResponse := performFeedJSONRequest(
-		router,
-		http.MethodPost,
-		"/api/feed/view-events",
-		`{"visitor_id":"visitor-002","video_id":2,"event_type":"COMPLETE","watch_ms":5000}`,
-		"event-1",
-	)
-	requireStatus(t, replayResponse, http.StatusOK)
-
-	var replayed viewEventAPIResponse
-	decodeJSON(t, replayResponse, &replayed)
-	if replayed.ID != event.ID || replayed.VideoID != event.VideoID || replayed.VisitorID != event.VisitorID {
-		t.Fatalf("unexpected replay response: %+v", replayed)
-	}
 }
 
 func TestFeedAPIValidation(t *testing.T) {
 	router := newFeedRouter(seedFeedItems())
 
-	badLimitResponse := performJSONRequest(router, http.MethodGet, "/api/feed/time?limit=0", "", "")
+	badLimitResponse := performJSONRequest(router, http.MethodGet, "/api/feed/timeline?limit=0", "", "")
 	requireStatus(t, badLimitResponse, http.StatusBadRequest)
 
-	badCursorResponse := performJSONRequest(router, http.MethodGet, "/api/feed/time?cursor=bad-cursor", "", "")
+	badCursorResponse := performJSONRequest(router, http.MethodGet, "/api/feed/timeline?cursor=bad-cursor", "", "")
 	requireStatus(t, badCursorResponse, http.StatusBadRequest)
-
-	emptyVideoResponse := performFeedJSONRequest(
-		router,
-		http.MethodPost,
-		"/api/feed/view-events",
-		`{"visitor_id":"visitor-001","event_type":"VIEW","watch_ms":3000}`,
-		"",
-	)
-	requireStatus(t, emptyVideoResponse, http.StatusBadRequest)
-
-	badEventTypeResponse := performFeedJSONRequest(
-		router,
-		http.MethodPost,
-		"/api/feed/view-events",
-		`{"visitor_id":"visitor-001","video_id":3,"event_type":"SKIP","watch_ms":3000}`,
-		"",
-	)
-	requireStatus(t, badEventTypeResponse, http.StatusBadRequest)
-
-	badWatchResponse := performFeedJSONRequest(
-		router,
-		http.MethodPost,
-		"/api/feed/view-events",
-		`{"visitor_id":"visitor-001","video_id":3,"event_type":"VIEW","watch_ms":-1}`,
-		"",
-	)
-	requireStatus(t, badWatchResponse, http.StatusBadRequest)
 }
 
 func newFeedRouter(items []*domainfeed.FeedItem) *gin.Engine {
@@ -226,46 +125,22 @@ func newFeedRouter(items []*domainfeed.FeedItem) *gin.Engine {
 
 	api := router.Group("/api")
 	feed := api.Group("/feed")
-	feed.GET("/time", handler.Time)
+	feed.GET("/timeline", handler.Timeline)
 	feed.GET("/refresh", handler.Refresh)
-	feed.POST("/view-events", handler.ReportViewEvent)
 
 	return router
-}
-
-func performFeedJSONRequest(router *gin.Engine, method, path, body, idempotencyKey string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
-	if body != "" {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if idempotencyKey != "" {
-		req.Header.Set("Idempotency-Key", idempotencyKey)
-	}
-
-	resp := httptest.NewRecorder()
-	router.ServeHTTP(resp, req)
-	return resp
 }
 
 func seedFeedItems() []*domainfeed.FeedItem {
 	base := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
 	return []*domainfeed.FeedItem{
-		domainfeed.RestoreFeedItem(1, 10, "old video", "https://example.com/1.mp4", "https://example.com/1.jpg", 1, 2, 3, base.Add(-2*time.Hour)),
-		domainfeed.RestoreFeedItem(2, 20, "middle video", "https://example.com/2.mp4", "https://example.com/2.jpg", 4, 5, 6, base.Add(-1*time.Hour)),
-		domainfeed.RestoreFeedItem(3, 30, "new video", "https://example.com/3.mp4", "https://example.com/3.jpg", 7, 8, 9, base),
+		domainfeed.RestoreFeedItem(1, 10, "old author", "https://example.com/avatar-1.jpg", "old video", "old description", "https://example.com/1.mp4", "https://example.com/1.jpg", 1, 2, 3, base.Add(-2*time.Hour)),
+		domainfeed.RestoreFeedItem(2, 20, "middle author", "https://example.com/avatar-2.jpg", "middle video", "middle description", "https://example.com/2.mp4", "https://example.com/2.jpg", 4, 5, 6, base.Add(-1*time.Hour)),
+		domainfeed.RestoreFeedItem(3, 30, "new author", "https://example.com/avatar-3.jpg", "new video", "new description", "https://example.com/3.mp4", "https://example.com/3.jpg", 7, 8, 9, base),
 	}
 }
 
 func cloneFeedItem(item *domainfeed.FeedItem) *domainfeed.FeedItem {
 	cloned := *item
-	return &cloned
-}
-
-func cloneViewEvent(event *domainfeed.ViewEvent) *domainfeed.ViewEvent {
-	cloned := *event
-	if event.UserID != nil {
-		userID := *event.UserID
-		cloned.UserID = &userID
-	}
 	return &cloned
 }
