@@ -3,11 +3,14 @@ package interfaceshttprouter
 import (
 	"database/sql"
 	applicationaccount "feedsystem_video_hard/internal/application/account"
+	applicationvideo "feedsystem_video_hard/internal/application/video"
 	infraconfig "feedsystem_video_hard/internal/infra/config"
 	infrajwt "feedsystem_video_hard/internal/infra/jwt"
 	infraaccount "feedsystem_video_hard/internal/infra/persistence/account"
+	infravideo "feedsystem_video_hard/internal/infra/persistence/video"
 	interfaceshttpaccount "feedsystem_video_hard/internal/interfaces/http/account"
 	interfaceshttpmiddleware "feedsystem_video_hard/internal/interfaces/http/middleware"
+	interfaceshttpvideo "feedsystem_video_hard/internal/interfaces/http/video"
 
 	"github.com/gin-gonic/gin"
 	gormmysql "gorm.io/driver/mysql"
@@ -22,7 +25,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 		return err
 	}
 
-	if err := gormDB.AutoMigrate(&infraaccount.UserModel{}); err != nil {
+	if err := gormDB.AutoMigrate(&infraaccount.UserModel{}, &infravideo.VideoModel{}); err != nil {
 		return err
 	}
 
@@ -34,6 +37,9 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	accountRepo := infraaccount.New(gormDB)
 	accountService := applicationaccount.NewService(accountRepo, jwtManager)
 	accountHandler := interfaceshttpaccount.NewHandler(accountService)
+	videoRepo := infravideo.New(gormDB)
+	videoService := applicationvideo.NewService(videoRepo)
+	videoHandler := interfaceshttpvideo.NewHandler(videoService)
 
 	g.GET("/health", HealthCheck)
 
@@ -48,6 +54,14 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	users := api.Group("/users", authMiddleware)
 	users.GET("/me", accountHandler.Me)
 	users.PATCH("/me", accountHandler.UpdateMe)
+
+	videos := api.Group("/videos")
+	videos.POST("", authMiddleware, videoHandler.Create)
+	videos.GET("/mine", authMiddleware, videoHandler.ListMine)
+	videos.GET("/:videoId", videoHandler.Get)
+	videos.DELETE("/:videoId", authMiddleware, videoHandler.Delete)
+
+	api.GET("/users/:userId/videos", videoHandler.ListByAuthor)
 
 	return nil
 }
