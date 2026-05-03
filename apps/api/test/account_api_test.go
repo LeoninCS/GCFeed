@@ -9,11 +9,11 @@ import (
 	"sync"
 	"testing"
 
-	applicationaccount "feedsystem_video_hard/internal/application/account"
-	domainaccount "feedsystem_video_hard/internal/domain/account"
-	infrajwt "feedsystem_video_hard/internal/infra/jwt"
-	interfaceshttpaccount "feedsystem_video_hard/internal/interfaces/http/account"
-	interfaceshttpmiddleware "feedsystem_video_hard/internal/interfaces/http/middleware"
+	applicationaccount "GCFeed/internal/application/account"
+	domainaccount "GCFeed/internal/domain/account"
+	infrajwt "GCFeed/internal/infra/jwt"
+	interfaceshttpaccount "GCFeed/internal/interfaces/http/account"
+	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
 
 	"github.com/gin-gonic/gin"
 )

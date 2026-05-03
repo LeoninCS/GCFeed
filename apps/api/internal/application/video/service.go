@@ -1,9 +1,9 @@
 package applicationvideo
 
 import (
+	domainvideo "GCFeed/internal/domain/video"
 	"context"
 	"errors"
-	domainvideo "feedsystem_video_hard/internal/domain/video"
 	"strings"
 )
 

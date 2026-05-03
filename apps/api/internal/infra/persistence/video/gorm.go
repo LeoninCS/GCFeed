@@ -1,9 +1,9 @@
 package infravideo
 
 import (
+	domainvideo "GCFeed/internal/domain/video"
 	"context"
 	"errors"
-	domainvideo "feedsystem_video_hard/internal/domain/video"
 
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"

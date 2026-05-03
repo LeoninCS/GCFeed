@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	infraconfig "feedsystem_video_hard/internal/infra/config"
+	infraconfig "GCFeed/internal/infra/config"
 
 	_ "github.com/go-sql-driver/mysql"
 )

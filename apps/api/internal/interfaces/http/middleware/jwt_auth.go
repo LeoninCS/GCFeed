@@ -1,7 +1,7 @@
 package interfaceshttpmiddleware
 
 import (
-	infrajwt "feedsystem_video_hard/internal/infra/jwt"
+	infrajwt "GCFeed/internal/infra/jwt"
 	"net/http"
 	"strings"
 

@@ -3,10 +3,10 @@ package main
 import (
 	"log"
 
-	infraconfig "feedsystem_video_hard/internal/infra/config"
-	infradatabase "feedsystem_video_hard/internal/infra/database"
-	infrahttpgin "feedsystem_video_hard/internal/infra/httpgin"
-	interfaceshttprouter "feedsystem_video_hard/internal/interfaces/http/router"
+	infraconfig "GCFeed/internal/infra/config"
+	infradatabase "GCFeed/internal/infra/database"
+	infrahttpgin "GCFeed/internal/infra/httpgin"
+	interfaceshttprouter "GCFeed/internal/interfaces/http/router"
 )
 
 const configPath = "./configs/config.yaml"

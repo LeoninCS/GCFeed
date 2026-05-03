@@ -1,10 +1,10 @@
 package interfaceshttpaccount
 
 import (
+	applicationaccount "GCFeed/internal/application/account"
+	domainaccount "GCFeed/internal/domain/account"
+	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
 	"errors"
-	applicationaccount "feedsystem_video_hard/internal/application/account"
-	domainaccount "feedsystem_video_hard/internal/domain/account"
-	interfaceshttpmiddleware "feedsystem_video_hard/internal/interfaces/http/middleware"
 	"net/http"
 
 	"github.com/gin-gonic/gin"

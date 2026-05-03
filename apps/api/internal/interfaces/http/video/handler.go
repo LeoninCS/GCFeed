@@ -1,10 +1,10 @@
 package interfaceshttpvideo
 
 import (
+	applicationvideo "GCFeed/internal/application/video"
+	domainvideo "GCFeed/internal/domain/video"
+	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
 	"errors"
-	applicationvideo "feedsystem_video_hard/internal/application/video"
-	domainvideo "feedsystem_video_hard/internal/domain/video"
-	interfaceshttpmiddleware "feedsystem_video_hard/internal/interfaces/http/middleware"
 	"net/http"
 	"strconv"
 	"strings"

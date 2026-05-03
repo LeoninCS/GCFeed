@@ -1,4 +1,4 @@
-module feedsystem_video_hard
+module GCFeed
 
 go 1.26.1
 

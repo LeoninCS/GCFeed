@@ -1,9 +1,9 @@
 package applicationaccount
 
 import (
+	domainaccount "GCFeed/internal/domain/account"
 	"context"
 	"errors"
-	domainaccount "feedsystem_video_hard/internal/domain/account"
 	"strings"
 	"time"
 )

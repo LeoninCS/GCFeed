@@ -1,7 +1,7 @@
 package infrahttpgin
 
 import (
-	infraconfig "feedsystem_video_hard/internal/infra/config"
+	infraconfig "GCFeed/internal/infra/config"
 	"strconv"
 
 	"github.com/gin-gonic/gin"

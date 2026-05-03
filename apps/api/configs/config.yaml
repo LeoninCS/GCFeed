@@ -8,5 +8,5 @@ database:
   port: 3306
   user: "root"
   password: "sealos123"
-  name: "feedsystem_video_hard"
+  name: "GCFeed"
   

@@ -1,9 +1,9 @@
 {
   "info": {
     "_postman_id": "7d37992e-bfd0-4ce7-94be-6d93bf887d4b",
-    "name": "feedsystem_video_hard",
+    "name": "GCFeed",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Postman collection for feedsystem_video_hard API"
+    "description": "Postman collection for GCFeed API"
   },
   "variable": [
     {

@@ -1,9 +1,9 @@
 package infraaccount
 
 import (
+	domainaccount "GCFeed/internal/domain/account"
 	"context"
 	"errors"
-	domainaccount "feedsystem_video_hard/internal/domain/account"
 
 	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
