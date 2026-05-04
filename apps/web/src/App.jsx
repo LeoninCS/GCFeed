@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const TOKEN_KEY = "gcfeed.accessToken";
 const USER_KEY = "gcfeed.user";
+const FEED_TRANSITION_MS = 320;
 
 const image = {
   currentUser:
@@ -109,7 +110,7 @@ function App() {
       onNavigate={(path) => navigate(path, setRoute)}
       onLogout={() => logout(session, setRoute)}
     >
-      <FeedPage session={session} />
+      <FeedPage session={session} onNavigate={(path) => navigate(path, setRoute)} />
     </AppShell>
   );
 }
@@ -292,16 +293,24 @@ function TopNav({ user, authenticated, onNavigate, onLogout }) {
   );
 }
 
-function FeedPage({ session }) {
+function FeedPage({ session, onNavigate }) {
   const [items, setItems] = useState([]);
   const [index, setIndex] = useState(0);
   const [liked, setLiked] = useState({});
   const [favorited, setFavorited] = useState({});
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [commentsState, setCommentsState] = useState("idle");
+  const [commentsError, setCommentsError] = useState("");
   const [commentText, setCommentText] = useState("");
   const [feedState, setFeedState] = useState("loading");
   const [feedError, setFeedError] = useState("");
+  const [swipe, setSwipe] = useState(null);
   const wheelLocked = useRef(false);
+  const transitionTimer = useRef(null);
+  const feedMainRef = useRef(null);
+  const dragRef = useRef(null);
+  const swipeRef = useRef(null);
 
   const loadFeed = useCallback(() => {
     let live = true;
@@ -310,6 +319,7 @@ function FeedPage({ session }) {
     apiRequest("/api/feed/timeline?limit=12", { token: session.token })
       .then((data) => {
         if (!live) return;
+        setSwipe(null);
         setItems((data.items || []).map(mapFeedItem));
         setIndex(0);
         setFeedState("ready");
@@ -329,23 +339,279 @@ function FeedPage({ session }) {
     return loadFeed();
   }, [loadFeed]);
 
+  useEffect(() => {
+    return () => {
+      if (transitionTimer.current) {
+        window.clearTimeout(transitionTimer.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    swipeRef.current = swipe;
+  }, [swipe]);
+
+  useEffect(() => {
+    if (!swipe && index >= items.length && items.length > 0) {
+      setIndex(items.length - 1);
+    }
+  }, [index, items.length, swipe]);
+
   const current = items[index];
+  const visibleCurrent = swipe ? items[swipe.fromIndex] : current;
+  const visibleNext = swipe ? items[swipe.toIndex] : null;
+  const trackStyle = getFeedTrackStyle(swipe);
+
+  const updateCurrentItem = useCallback((videoID, patch) => {
+    setItems((state) => state.map((item) => (item.video_id === videoID ? { ...item, ...patch } : item)));
+  }, []);
+
+  const requireLogin = useCallback(() => {
+    if (session.token) return true;
+    onNavigate("/auth");
+    return false;
+  }, [onNavigate, session.token]);
+
+  const toggleLike = useCallback(async () => {
+    if (!current || swipe || !requireLogin()) return;
+    try {
+      const data = await apiRequest("/api/interactions/likes/toggle", {
+        method: "POST",
+        token: session.token,
+        headers: {
+          "Idempotency-Key": `web-like-${current.video_id}-${Date.now()}`
+        },
+        body: {
+          video_id: current.video_id
+        }
+      });
+      setLiked((state) => ({ ...state, [current.video_id]: Boolean(data.active) }));
+      updateCurrentItem(current.video_id, { like_count: data.like_count ?? current.like_count });
+    } catch (error) {
+      if (error.status === 401) {
+        session.clearAuth();
+        onNavigate("/auth");
+      }
+    }
+  }, [current, onNavigate, requireLogin, session, swipe, updateCurrentItem]);
+
+  const toggleFavorite = useCallback(async () => {
+    if (!current || swipe || !requireLogin()) return;
+    try {
+      const data = await apiRequest("/api/interactions/favorites/toggle", {
+        method: "POST",
+        token: session.token,
+        headers: {
+          "Idempotency-Key": `web-favorite-${current.video_id}-${Date.now()}`
+        },
+        body: {
+          video_id: current.video_id
+        }
+      });
+      setFavorited((state) => ({ ...state, [current.video_id]: Boolean(data.active) }));
+      updateCurrentItem(current.video_id, { favorite_count: data.favorite_count ?? current.favorite_count });
+    } catch (error) {
+      if (error.status === 401) {
+        session.clearAuth();
+        onNavigate("/auth");
+      }
+    }
+  }, [current, onNavigate, requireLogin, session, swipe, updateCurrentItem]);
+
+  const loadComments = useCallback(() => {
+    if (!current) return undefined;
+    let live = true;
+    setCommentsState("loading");
+    setCommentsError("");
+    apiRequest(`/api/interactions/comments?video_id=${current.video_id}&limit=50`)
+      .then((data) => {
+        if (!live) return;
+        setComments(data.items || []);
+        setCommentsState("ready");
+      })
+      .catch((error) => {
+        if (!live) return;
+        setComments([]);
+        setCommentsError(error.message || "评论加载失败");
+        setCommentsState("error");
+      });
+    return () => {
+      live = false;
+    };
+  }, [current]);
+
+  useEffect(() => {
+    if (!commentsOpen) return undefined;
+    return loadComments();
+  }, [commentsOpen, loadComments]);
+
+  async function submitComment() {
+    if (!current || !requireLogin()) return;
+    const content = commentText.trim();
+    if (!content) return;
+    try {
+      const data = await apiRequest("/api/interactions/comments", {
+        method: "POST",
+        token: session.token,
+        headers: {
+          "Idempotency-Key": `web-comment-${current.video_id}-${Date.now()}`
+        },
+        body: {
+          video_id: current.video_id,
+          content
+        }
+      });
+      setCommentText("");
+      setComments((state) => [data, ...state.filter((item) => item.id !== data.id)]);
+      updateCurrentItem(current.video_id, { comment_count: data.comment_count ?? current.comment_count + 1 });
+      setCommentsState("ready");
+    } catch (error) {
+      if (error.status === 401) {
+        session.clearAuth();
+        onNavigate("/auth");
+        return;
+      }
+      setCommentsError(error.message || "评论发布失败");
+      setCommentsState("error");
+    }
+  }
+
+  function getStageHeight() {
+    return feedMainRef.current?.clientHeight || window.innerHeight || 1;
+  }
+
+  function moveTo(nextIndex) {
+    if (swipe || nextIndex === index || nextIndex < 0 || nextIndex >= items.length) return;
+    const direction = nextIndex > index ? "next" : "prev";
+    const height = getStageHeight();
+    if (transitionTimer.current) {
+      window.clearTimeout(transitionTimer.current);
+    }
+    setSwipe({
+      fromIndex: index,
+      toIndex: nextIndex,
+      direction,
+      height,
+      offset: 0,
+      settling: ""
+    });
+    window.requestAnimationFrame(() => {
+      setSwipe((state) =>
+        state && state.fromIndex === index && state.toIndex === nextIndex
+          ? {
+              ...state,
+              offset: direction === "next" ? -height : height,
+              settling: "commit"
+            }
+          : state
+      );
+    });
+    transitionTimer.current = window.setTimeout(() => {
+      setIndex(nextIndex);
+      setSwipe(null);
+      transitionTimer.current = null;
+    }, FEED_TRANSITION_MS);
+  }
+
+  function settleSwipe(commit) {
+    const active = swipeRef.current;
+    if (!active) return;
+    if (transitionTimer.current) {
+      window.clearTimeout(transitionTimer.current);
+    }
+    setSwipe({
+      ...active,
+      offset: commit ? (active.direction === "next" ? -active.height : active.height) : 0,
+      settling: commit ? "commit" : "cancel"
+    });
+    transitionTimer.current = window.setTimeout(() => {
+      if (commit) {
+        setIndex(active.toIndex);
+      }
+      setSwipe(null);
+      transitionTimer.current = null;
+    }, FEED_TRANSITION_MS);
+  }
+
+  function handlePointerDown(event) {
+    if (event.button > 0 || swipe || items.length < 2 || isInteractiveTarget(event.target)) return;
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      fromIndex: index,
+      active: false,
+      direction: "",
+      height: 0
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const delta = event.clientY - drag.startY;
+    if (!drag.active) {
+      if (Math.abs(delta) < 8) return;
+      const direction = delta < 0 ? "next" : "prev";
+      const toIndex = direction === "next" ? drag.fromIndex + 1 : drag.fromIndex - 1;
+      if (toIndex < 0 || toIndex >= items.length) {
+        return;
+      }
+      const height = getStageHeight();
+      dragRef.current = {
+        ...drag,
+        active: true,
+        direction,
+        toIndex,
+        height
+      };
+      setSwipe({
+        fromIndex: drag.fromIndex,
+        toIndex,
+        direction,
+        height,
+        offset: clampSwipeOffset(direction, delta, height),
+        settling: ""
+      });
+      event.preventDefault();
+      return;
+    }
+
+    setSwipe((state) =>
+      state
+        ? {
+            ...state,
+            offset: clampSwipeOffset(state.direction, delta, state.height),
+            settling: ""
+          }
+        : state
+    );
+    event.preventDefault();
+  }
+
+  function handlePointerEnd(event) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    const active = swipeRef.current;
+    if (!drag.active || !active) return;
+    const threshold = Math.min(active.height * 0.24, 220);
+    settleSwipe(Math.abs(active.offset) >= threshold);
+  }
 
   useEffect(() => {
     const handleKeyDown = (event) => {
       if (["ArrowDown", "j", "J"].includes(event.key)) {
-        setIndex((value) => Math.min(items.length - 1, value + 1));
+        moveTo(Math.min(items.length - 1, index + 1));
       }
       if (["ArrowUp", "k", "K"].includes(event.key)) {
-        setIndex((value) => Math.max(0, value - 1));
+        moveTo(Math.max(0, index - 1));
       }
       if (event.key === "l" || event.key === "L") {
-        if (!current) return;
-        setLiked((state) => ({ ...state, [current.video_id]: !state[current.video_id] }));
+        toggleLike();
       }
       if (event.key === "f" || event.key === "F") {
-        if (!current) return;
-        setFavorited((state) => ({ ...state, [current.video_id]: !state[current.video_id] }));
+        toggleFavorite();
       }
       if (event.key === "c" || event.key === "C") {
         setCommentsOpen(true);
@@ -353,18 +619,18 @@ function FeedPage({ session }) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [current, items.length]);
+  }, [index, items.length, toggleFavorite, toggleLike, swipe]);
 
   function goNext() {
-    setIndex((value) => Math.min(items.length - 1, value + 1));
+    moveTo(Math.min(items.length - 1, index + 1));
   }
 
   function goPrev() {
-    setIndex((value) => Math.max(0, value - 1));
+    moveTo(Math.max(0, index - 1));
   }
 
   function handleWheel(event) {
-    if (Math.abs(event.deltaY) < 32 || wheelLocked.current || items.length < 2) return;
+    if (Math.abs(event.deltaY) < 32 || wheelLocked.current || swipe || items.length < 2) return;
     wheelLocked.current = true;
     if (event.deltaY > 0) {
       goNext();
@@ -378,7 +644,15 @@ function FeedPage({ session }) {
 
   return (
     <main className="feed-layout">
-      <section className="feed-main" onWheel={handleWheel}>
+      <section
+        className="feed-main"
+        ref={feedMainRef}
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+      >
         {feedState === "loading" && <FeedMessage icon="hourglass_top" title="正在加载 Feed" />}
         {feedState === "error" && (
           <FeedMessage icon="sync_problem" title={feedError} action="重新加载" onAction={loadFeed} />
@@ -386,18 +660,44 @@ function FeedPage({ session }) {
         {feedState === "ready" && items.length === 0 && (
           <FeedMessage icon="video_library" title="Feed 暂无视频" action="刷新" onAction={loadFeed} />
         )}
-        {current && (
-          <div className="feed-stage-wrap">
-            <VideoStage
-              item={current}
-              liked={Boolean(liked[current.video_id])}
-              favorited={Boolean(favorited[current.video_id])}
-              onLike={() => setLiked((state) => ({ ...state, [current.video_id]: !state[current.video_id] }))}
-              onComment={() => setCommentsOpen(true)}
-              onFavorite={() =>
-                setFavorited((state) => ({ ...state, [current.video_id]: !state[current.video_id] }))
-              }
-            />
+        {visibleCurrent && (
+          <div className={`feed-stage-wrap ${swipe ? `swiping ${swipe.direction} ${swipe.settling ? "settling" : "dragging"}` : ""}`}>
+            <div className="feed-stage-track" style={trackStyle}>
+              {swipe?.direction === "prev" && visibleNext && (
+                <div className="feed-stage-layer">
+                  <VideoStage
+                    item={visibleNext}
+                    liked={Boolean(liked[visibleNext.video_id])}
+                    favorited={Boolean(favorited[visibleNext.video_id])}
+                    onLike={toggleLike}
+                    onComment={() => setCommentsOpen(true)}
+                    onFavorite={toggleFavorite}
+                  />
+                </div>
+              )}
+              <div className="feed-stage-layer">
+                <VideoStage
+                  item={visibleCurrent}
+                  liked={Boolean(liked[visibleCurrent.video_id])}
+                  favorited={Boolean(favorited[visibleCurrent.video_id])}
+                  onLike={toggleLike}
+                  onComment={() => setCommentsOpen(true)}
+                  onFavorite={toggleFavorite}
+                />
+              </div>
+              {swipe?.direction === "next" && visibleNext && (
+                <div className="feed-stage-layer">
+                  <VideoStage
+                    item={visibleNext}
+                    liked={Boolean(liked[visibleNext.video_id])}
+                    favorited={Boolean(favorited[visibleNext.video_id])}
+                    onLike={toggleLike}
+                    onComment={() => setCommentsOpen(true)}
+                    onFavorite={toggleFavorite}
+                  />
+                </div>
+              )}
+            </div>
           </div>
         )}
       </section>
@@ -406,9 +706,14 @@ function FeedPage({ session }) {
         value={commentText}
         onChange={setCommentText}
         onClose={() => setCommentsOpen(false)}
-        onSubmit={() => setCommentText("")}
+        onSubmit={submitComment}
         user={session.user || emptyProfile}
         count={current?.comment_count || 0}
+        comments={comments}
+        state={commentsState}
+        error={commentsError}
+        onRetry={loadComments}
+        authenticated={Boolean(session.token && session.user)}
       />
     </main>
   );
@@ -450,9 +755,9 @@ function VideoStage({ item, liked, favorited, onLike, onComment, onFavorite }) {
         <p>{item.description}</p>
       </div>
       <div className="action-rail">
-        <ActionButton icon="favorite" label={formatMetric(item.like_count + (liked ? 1 : 0))} active={liked} onClick={onLike} />
+        <ActionButton icon="favorite" label={formatMetric(item.like_count)} active={liked} onClick={onLike} />
         <ActionButton icon="chat_bubble" label={formatMetric(item.comment_count)} onClick={onComment} />
-        <ActionButton icon="bookmark" label={formatMetric(item.favorite_count + (favorited ? 1 : 0))} active={favorited} onClick={onFavorite} />
+        <ActionButton icon="bookmark" label={formatMetric(item.favorite_count)} active={favorited} onClick={onFavorite} />
         <ActionButton icon="share" label="" compact />
       </div>
       <div className="progress-track">
@@ -471,7 +776,7 @@ function ActionButton({ icon, label, active, compact, onClick }) {
   );
 }
 
-function CommentPanel({ open, value, onChange, onSubmit, onClose, user, count }) {
+function CommentPanel({ open, value, onChange, onSubmit, onClose, user, count, comments, state, error, onRetry, authenticated }) {
   return (
     <aside className={`comment-panel ${open ? "open" : ""}`}>
       <header className="comment-header">
@@ -488,11 +793,21 @@ function CommentPanel({ open, value, onChange, onSubmit, onClose, user, count })
         </div>
       </header>
       <div className="comment-list">
-        <div className="comment-empty">
-          <span className="material-symbols-outlined">chat_bubble</span>
-          <strong>评论接口待接入</strong>
-          <p>当前后端已提供 Feed 数据与观看上报，评论列表和发表评论接口接入后会显示真实评论。</p>
-        </div>
+        {state === "loading" && <CommentMessage icon="hourglass_top" title="正在加载评论" />}
+        {state === "error" && <CommentMessage icon="sync_problem" title={error || "评论加载失败"} action="重试" onAction={onRetry} />}
+        {state === "ready" && comments.length === 0 && <CommentMessage icon="chat_bubble" title="暂无评论" />}
+        {comments.map((comment) => (
+          <article className="comment-item" key={comment.id}>
+            <img src={comment.user_avatar_url || image.currentUser} alt="" />
+            <div>
+              <div className="comment-meta">
+                <strong>{comment.user_nickname || `user_${comment.user_id}`}</strong>
+                <span>{formatRelativeTime(comment.created_at)}</span>
+              </div>
+              <p>{comment.content}</p>
+            </div>
+          </article>
+        ))}
       </div>
       <form
         className="comment-form"
@@ -502,12 +817,27 @@ function CommentPanel({ open, value, onChange, onSubmit, onClose, user, count })
         }}
       >
         <img src={user.avatar_url || image.currentUser} alt="" />
-        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Add a comment..." />
-        <button aria-label="Send comment">
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={authenticated ? "Add a comment..." : "登录后评论"}
+          disabled={!authenticated}
+        />
+        <button aria-label="Send comment" disabled={!authenticated || !value.trim()}>
           <span className="material-symbols-outlined">send</span>
         </button>
       </form>
     </aside>
+  );
+}
+
+function CommentMessage({ icon, title, action, onAction }) {
+  return (
+    <div className="comment-empty">
+      <span className="material-symbols-outlined">{icon}</span>
+      <strong>{title}</strong>
+      {action && <button onClick={onAction}>{action}</button>}
+    </div>
   );
 }
 
@@ -1001,6 +1331,44 @@ function formatMetric(value) {
   if (number >= 1000000) return `${(number / 1000000).toFixed(number >= 10000000 ? 0 : 1)}M`;
   if (number >= 1000) return `${(number / 1000).toFixed(number >= 10000 ? 0 : 1)}k`;
   return String(number);
+}
+
+function getFeedTrackStyle(swipe) {
+  if (!swipe) {
+    return {
+      transform: "translate3d(0, 0, 0)"
+    };
+  }
+  const base = swipe.direction === "prev" ? -swipe.height : 0;
+  return {
+    transform: `translate3d(0, ${base + swipe.offset}px, 0)`,
+    transition: swipe.settling ? `transform ${FEED_TRANSITION_MS}ms cubic-bezier(0.16, 1, 0.3, 1)` : "none"
+  };
+}
+
+function clampSwipeOffset(direction, delta, height) {
+  if (direction === "next") {
+    return Math.max(-height, Math.min(0, delta));
+  }
+  return Math.min(height, Math.max(0, delta));
+}
+
+function isInteractiveTarget(target) {
+  return Boolean(target?.closest?.("button, a, input, textarea, select, .comment-panel"));
+}
+
+function formatRelativeTime(value) {
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  if (seconds < 60) return "刚刚";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  return new Date(value).toLocaleDateString();
 }
 
 export default App;
