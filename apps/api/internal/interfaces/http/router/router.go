@@ -29,7 +29,10 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 		return err
 	}
 
-	if err := gormDB.AutoMigrate(&infraaccount.UserModel{}, &infravideo.VideoModel{}); err != nil {
+	if err := gormDB.AutoMigrate(&infraaccount.UserModel{}, &infravideo.VideoModel{}, &infravideo.VideoStatModel{}); err != nil {
+		return err
+	}
+	if err := infravideo.EnsureStats(gormDB); err != nil {
 		return err
 	}
 
