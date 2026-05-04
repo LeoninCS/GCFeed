@@ -13,6 +13,7 @@ type Repository struct {
 	db *gorm.DB
 }
 
+// timelineFeedVideoModel 承接 Feed 联表查询结果。
 type timelineFeedVideoModel struct {
 	VideoID         int64
 	AuthorID        int64
@@ -28,10 +29,12 @@ type timelineFeedVideoModel struct {
 	PublishedAt     time.Time
 }
 
+// New 创建 Feed 仓储实现。
 func New(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// ListTimelineFeed 查询时间线 Feed，视频、作者和统计数据在这里一次性拼好。
 func (r *Repository) ListTimelineFeed(ctx context.Context, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedItem, error) {
 	var models []timelineFeedVideoModel
 	query := r.db.WithContext(ctx).
@@ -42,6 +45,7 @@ func (r *Repository) ListTimelineFeed(ctx context.Context, cursor *domainfeed.Ti
 		Where("v.status = ? AND v.published_at IS NOT NULL", domainvideo.StatusPublished)
 
 	if cursor != nil {
+		// 游标分页条件和排序字段保持一致：published_at DESC, id DESC。
 		query = query.Where(
 			"(v.published_at < ? OR (v.published_at = ? AND v.id < ?))",
 			cursor.PublishedAt,
@@ -62,6 +66,7 @@ func (r *Repository) ListTimelineFeed(ctx context.Context, cursor *domainfeed.Ti
 
 	items := make([]*domainfeed.FeedItem, 0, len(models))
 	for _, model := range models {
+		// 仓储层把数据库查询结果恢复成领域 FeedItem，HTTP 层只处理响应格式。
 		items = append(items, domainfeed.RestoreFeedItem(
 			model.VideoID,
 			model.AuthorID,

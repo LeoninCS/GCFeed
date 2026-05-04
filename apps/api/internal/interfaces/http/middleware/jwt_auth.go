@@ -11,6 +11,7 @@ import (
 const ContextUserIDKey = "auth_user_id"
 const ContextRoleKey = "auth_role"
 
+// NewJWTAuth 返回 Gin 鉴权中间件，负责解析 Bearer token 并写入用户上下文。
 func NewJWTAuth(jwtManager *infrajwt.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := strings.TrimSpace(c.GetHeader("Authorization"))
@@ -21,6 +22,7 @@ func NewJWTAuth(jwtManager *infrajwt.Manager) gin.HandlerFunc {
 			return
 		}
 
+		// Authorization 标准格式为：Bearer <access_token>。
 		parts := strings.SplitN(header, " ", 2)
 		if len(parts) != 2 {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
@@ -44,6 +46,7 @@ func NewJWTAuth(jwtManager *infrajwt.Manager) gin.HandlerFunc {
 			return
 		}
 
+		// 后续 Handler 从 gin.Context 中读取用户 ID 和角色，避免重复解析 JWT。
 		c.Set(ContextUserIDKey, claims.UserID)
 		c.Set(ContextRoleKey, claims.Role)
 		c.Next()

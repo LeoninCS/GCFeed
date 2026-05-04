@@ -50,26 +50,31 @@ type commentCursorPayload struct {
 	CommentID int64  `json:"comment_id"`
 }
 
-func NewService(repo domaininteraction.Repository) *Service {
+func New(repo domaininteraction.Repository) *Service {
 	return &Service{repo: repo}
 }
 
+// Like 设置用户对视频的点赞状态为有效。
 func (s *Service) Like(ctx context.Context, userID int64, videoID int64, idempotencyKey string) (*ActionResult, error) {
 	return s.setAction(ctx, userID, videoID, domaininteraction.ActionTypeLike, true, idempotencyKey)
 }
 
+// Unlike 设置用户对视频的点赞状态为取消。
 func (s *Service) Unlike(ctx context.Context, userID int64, videoID int64, idempotencyKey string) (*ActionResult, error) {
 	return s.setAction(ctx, userID, videoID, domaininteraction.ActionTypeLike, false, idempotencyKey)
 }
 
+// Favorite 设置用户对视频的收藏状态为有效。
 func (s *Service) Favorite(ctx context.Context, userID int64, videoID int64, idempotencyKey string) (*ActionResult, error) {
 	return s.setAction(ctx, userID, videoID, domaininteraction.ActionTypeFavorite, true, idempotencyKey)
 }
 
+// Unfavorite 设置用户对视频的收藏状态为取消。
 func (s *Service) Unfavorite(ctx context.Context, userID int64, videoID int64, idempotencyKey string) (*ActionResult, error) {
 	return s.setAction(ctx, userID, videoID, domaininteraction.ActionTypeFavorite, false, idempotencyKey)
 }
 
+// CreateComment 创建评论，并通过幂等键防止客户端重试生成重复评论。
 func (s *Service) CreateComment(ctx context.Context, userID int64, videoID int64, content string, idempotencyKey string) (*CreateCommentResult, error) {
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if len(idempotencyKey) > domaininteraction.MaxIdempotencyKeyLength {
@@ -77,6 +82,7 @@ func (s *Service) CreateComment(ctx context.Context, userID int64, videoID int64
 	}
 
 	if idempotencyKey != "" {
+		// 幂等键命中时返回已创建的评论，客户端重试可以拿到同一结果。
 		comment, count, err := s.repo.FindCommentByUserAndIdempotencyKey(ctx, userID, idempotencyKey)
 		if err == nil {
 			return &CreateCommentResult{Comment: comment, CommentCount: count}, nil
@@ -102,6 +108,7 @@ func (s *Service) CreateComment(ctx context.Context, userID int64, videoID int64
 	return &CreateCommentResult{Comment: created, CommentCount: count}, nil
 }
 
+// ListComments 使用游标分页查询评论，返回下一页游标和 has_more。
 func (s *Service) ListComments(ctx context.Context, videoID int64, cursor string, limit int) (*CommentListResult, error) {
 	if videoID <= 0 {
 		return nil, domaininteraction.ErrInvalidVideoID
@@ -113,6 +120,7 @@ func (s *Service) ListComments(ctx context.Context, videoID int64, cursor string
 	}
 	limit = normalizeCommentLimit(limit)
 
+	// 多查 1 条用于判断是否还有下一页，返回给客户端时再裁掉。
 	items, err := s.repo.ListComments(ctx, videoID, parsedCursor, limit+1)
 	if err != nil {
 		return nil, ErrLoadInteractionFailed
@@ -138,6 +146,7 @@ func (s *Service) ListComments(ctx context.Context, videoID int64, cursor string
 	}, nil
 }
 
+// DeleteComment 删除评论并返回删除后的评论状态和视频评论数。
 func (s *Service) DeleteComment(ctx context.Context, commentID int64, userID int64, role string) (*DeleteCommentResult, error) {
 	if commentID <= 0 {
 		return nil, domaininteraction.ErrInvalidCommentID
@@ -162,6 +171,7 @@ func (s *Service) DeleteComment(ctx context.Context, commentID int64, userID int
 	}, nil
 }
 
+// setAction 统一处理点赞和收藏状态变更，actionType 区分点赞或收藏，active 表示目标状态。
 func (s *Service) setAction(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*ActionResult, error) {
 	if userID <= 0 {
 		return nil, domaininteraction.ErrInvalidUserID
@@ -178,6 +188,7 @@ func (s *Service) setAction(ctx context.Context, userID int64, videoID int64, ac
 		return nil, err
 	}
 
+	// active 由 HTTP 方法决定：PUT 表示生效，DELETE 表示取消。
 	action, count, err := s.repo.SetAction(ctx, userID, videoID, actionType, active, idempotencyKey)
 	if err != nil {
 		if errors.Is(err, domaininteraction.ErrVideoNotFound) {
@@ -199,6 +210,7 @@ func (s *Service) setAction(ctx context.Context, userID int64, videoID int64, ac
 	return result, nil
 }
 
+// normalizeCommentLimit 统一评论分页默认值和最大值。
 func normalizeCommentLimit(limit int) int {
 	if limit <= 0 {
 		return defaultCommentLimit
@@ -209,6 +221,7 @@ func normalizeCommentLimit(limit int) int {
 	return limit
 }
 
+// parseCommentCursor 解析上一页返回的游标，游标内保存最后一条评论的排序字段。
 func parseCommentCursor(raw string) (*domaininteraction.CommentCursor, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -239,6 +252,7 @@ func parseCommentCursor(raw string) (*domaininteraction.CommentCursor, error) {
 	}, nil
 }
 
+// encodeCommentCursor 把当前页最后一条评论的排序字段编码成下一页游标。
 func encodeCommentCursor(cursor *domaininteraction.CommentCursor) string {
 	if cursor == nil || cursor.CommentID <= 0 || cursor.CreatedAt.IsZero() {
 		return ""

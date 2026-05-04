@@ -63,6 +63,7 @@ type memoryInteractionStat struct {
 	FavoriteCount int
 }
 
+// memoryInteractionRepo 是互动测试用内存仓储，模拟点赞、收藏、评论和计数。
 type memoryInteractionRepo struct {
 	mu            sync.Mutex
 	nextActionID  int64
@@ -89,6 +90,7 @@ func newMemoryInteractionRepo() *memoryInteractionRepo {
 	}
 }
 
+// SetAction 模拟点赞/收藏状态变更，并维护对应计数。
 func (r *memoryInteractionRepo) SetAction(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*domaininteraction.Action, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -100,6 +102,7 @@ func (r *memoryInteractionRepo) SetAction(ctx context.Context, userID int64, vid
 	key := memoryInteractionActionKey(userID, videoID, actionType)
 	action, exists := r.actions[key]
 	if exists && idempotencyKey != "" && action.IdempotencyKey == strings.TrimSpace(idempotencyKey) {
+		// 幂等键命中时直接返回当前状态和计数，模拟真实仓储重放逻辑。
 		return cloneInteractionAction(action), r.actionCount(videoID, actionType), nil
 	}
 
@@ -140,6 +143,7 @@ func (r *memoryInteractionRepo) SetAction(ctx context.Context, userID int64, vid
 	return cloneInteractionAction(action), r.actionCount(videoID, actionType), nil
 }
 
+// CreateComment 模拟评论创建，并维护视频评论数和评论幂等索引。
 func (r *memoryInteractionRepo) CreateComment(ctx context.Context, comment *domaininteraction.Comment) (*domaininteraction.Comment, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -172,6 +176,7 @@ func (r *memoryInteractionRepo) CreateComment(ctx context.Context, comment *doma
 	return cloneInteractionComment(comment), stat.CommentCount, nil
 }
 
+// FindCommentByUserAndIdempotencyKey 模拟评论创建接口的幂等查询。
 func (r *memoryInteractionRepo) FindCommentByUserAndIdempotencyKey(ctx context.Context, userID int64, idempotencyKey string) (*domaininteraction.Comment, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -184,6 +189,7 @@ func (r *memoryInteractionRepo) FindCommentByUserAndIdempotencyKey(ctx context.C
 	return cloneInteractionComment(comment), r.stats[comment.VideoID].CommentCount, nil
 }
 
+// ListComments 模拟评论列表游标分页，排序规则与真实仓储一致。
 func (r *memoryInteractionRepo) ListComments(ctx context.Context, videoID int64, cursor *domaininteraction.CommentCursor, limit int) ([]*domaininteraction.Comment, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -210,6 +216,7 @@ func (r *memoryInteractionRepo) ListComments(ctx context.Context, videoID int64,
 	return comments[:limit], nil
 }
 
+// DeleteComment 模拟评论软删除，以及评论作者、视频作者、管理员三种删除权限。
 func (r *memoryInteractionRepo) DeleteComment(ctx context.Context, commentID int64, userID int64, role string) (*domaininteraction.Comment, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -234,6 +241,7 @@ func (r *memoryInteractionRepo) DeleteComment(ctx context.Context, commentID int
 	return cloneInteractionComment(comment), r.stats[comment.VideoID].CommentCount, nil
 }
 
+// TestInteractionActionFlow 覆盖点赞、幂等重放、取消点赞和收藏。
 func TestInteractionActionFlow(t *testing.T) {
 	router, jwtManager := newInteractionRouter(t)
 	token := signTestToken(t, jwtManager, 42)
@@ -272,6 +280,7 @@ func TestInteractionActionFlow(t *testing.T) {
 	}
 }
 
+// TestInteractionCommentFlow 覆盖创建评论、幂等重放、列表、权限删除和重复删除。
 func TestInteractionCommentFlow(t *testing.T) {
 	router, jwtManager := newInteractionRouter(t)
 	authorToken := signTestToken(t, jwtManager, 42)
@@ -323,6 +332,7 @@ func TestInteractionCommentFlow(t *testing.T) {
 	}
 }
 
+// TestInteractionValidation 覆盖互动接口的登录态、参数和资源校验。
 func TestInteractionValidation(t *testing.T) {
 	router, jwtManager := newInteractionRouter(t)
 	token := signTestToken(t, jwtManager, 42)
@@ -343,6 +353,7 @@ func TestInteractionValidation(t *testing.T) {
 	requireStatus(t, badList, http.StatusBadRequest)
 }
 
+// newInteractionRouter 只装配互动相关 RESTful 路由。
 func newInteractionRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	t.Helper()
 
@@ -355,8 +366,8 @@ func newInteractionRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	}
 
 	repo := newMemoryInteractionRepo()
-	service := applicationinteraction.NewService(repo)
-	handler := interfaceshttpinteraction.NewHandler(service)
+	service := applicationinteraction.New(repo)
+	handler := interfaceshttpinteraction.New(service)
 	authMiddleware := interfaceshttpmiddleware.NewJWTAuth(jwtManager)
 
 	api := router.Group("/api")
@@ -372,11 +383,13 @@ func newInteractionRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	return router, jwtManager
 }
 
+// videoPublished 模拟互动前校验视频是否可互动。
 func (r *memoryInteractionRepo) videoPublished(videoID int64) bool {
 	video, exists := r.videos[videoID]
 	return exists && video.Status == 2
 }
 
+// addActionCount 根据行为类型增加或减少点赞/收藏数。
 func (r *memoryInteractionRepo) addActionCount(videoID int64, actionType string, delta int) {
 	stat := r.stats[videoID]
 	if actionType == domaininteraction.ActionTypeLike {
@@ -387,6 +400,7 @@ func (r *memoryInteractionRepo) addActionCount(videoID int64, actionType string,
 	r.stats[videoID] = stat
 }
 
+// actionCount 根据行为类型返回当前点赞数或收藏数。
 func (r *memoryInteractionRepo) actionCount(videoID int64, actionType string) int {
 	stat := r.stats[videoID]
 	if actionType == domaininteraction.ActionTypeLike {
@@ -395,18 +409,22 @@ func (r *memoryInteractionRepo) actionCount(videoID int64, actionType string) in
 	return stat.FavoriteCount
 }
 
+// memoryInteractionActionKey 模拟 user_id + video_id + action_type 唯一索引。
 func memoryInteractionActionKey(userID int64, videoID int64, actionType string) string {
 	return strings.Join([]string{int64String(userID), int64String(videoID), actionType}, ":")
 }
 
+// memoryInteractionCommentIdemKey 模拟 user_id + idempotency_key 唯一索引。
 func memoryInteractionCommentIdemKey(userID int64, idempotencyKey string) string {
 	return int64String(userID) + ":" + strings.TrimSpace(idempotencyKey)
 }
 
+// int64String 统一测试里 int64 ID 的字符串转换。
 func int64String(value int64) string {
 	return strconv.FormatInt(value, 10)
 }
 
+// memoryInteractionNickname 为测试评论补齐用户昵称。
 func memoryInteractionNickname(userID int64) string {
 	if userID == 77 {
 		return "user-77"
@@ -414,6 +432,7 @@ func memoryInteractionNickname(userID int64) string {
 	return "user"
 }
 
+// memoryInteractionAvatar 为测试评论补齐用户头像。
 func memoryInteractionAvatar(userID int64) string {
 	if userID == 77 {
 		return "https://example.com/avatar-77.jpg"
@@ -421,16 +440,19 @@ func memoryInteractionAvatar(userID int64) string {
 	return ""
 }
 
+// cloneInteractionAction 返回互动行为副本，隔离仓储内部状态。
 func cloneInteractionAction(action *domaininteraction.Action) *domaininteraction.Action {
 	cloned := *action
 	return &cloned
 }
 
+// cloneInteractionComment 返回评论副本，隔离仓储内部状态。
 func cloneInteractionComment(comment *domaininteraction.Comment) *domaininteraction.Comment {
 	cloned := *comment
 	return &cloned
 }
 
+// clampMemoryCount 防止测试仓储中的计数被减成负数。
 func clampMemoryCount(value int) int {
 	if value < 0 {
 		return 0

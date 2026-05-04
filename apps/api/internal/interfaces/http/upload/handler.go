@@ -16,10 +16,12 @@ import (
 
 const maxUploadBytes = 1024 << 20
 
+// Handler 管理本地上传目录，当前项目把文件保存到 ./uploads。
 type Handler struct {
 	root string
 }
 
+// uploadResponse 是上传成功后返回给前端的文件访问地址和元信息。
 type uploadResponse struct {
 	URL      string `json:"url"`
 	Kind     string `json:"kind"`
@@ -27,11 +29,14 @@ type uploadResponse struct {
 	Size     int64  `json:"size"`
 }
 
-func NewHandler(root string) *Handler {
+// New 创建上传 Handler，root 是文件保存根目录。
+func New(root string) *Handler {
 	return &Handler{root: root}
 }
 
+// Create 接收 multipart/form-data 文件，并按 kind 保存到不同子目录。
 func (h *Handler) Create(c *gin.Context) {
+	// MaxBytesReader 在读取请求体前限制上传大小，避免大文件撑爆内存或磁盘。
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadBytes)
 
 	file, err := c.FormFile("file")
@@ -51,6 +56,7 @@ func (h *Handler) Create(c *gin.Context) {
 		ext = ".bin"
 	}
 
+	// 文件名加入时间戳和随机后缀，降低不同用户上传同名文件的冲突概率。
 	filename := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), randomSuffix(), ext)
 	targetDir := filepath.Join(h.root, kind)
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
@@ -72,6 +78,7 @@ func (h *Handler) Create(c *gin.Context) {
 	})
 }
 
+// normalizeKind 规范化文件分类，分类会影响保存目录和访问 URL。
 func normalizeKind(raw string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "video":
@@ -89,6 +96,7 @@ func normalizeKind(raw string) (string, bool) {
 	}
 }
 
+// randomSuffix 生成文件名随机后缀，随机失败时用时间戳兜底。
 func randomSuffix() string {
 	buf := make([]byte, 6)
 	if _, err := rand.Read(buf); err == nil {

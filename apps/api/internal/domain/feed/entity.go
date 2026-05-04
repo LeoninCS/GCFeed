@@ -7,6 +7,7 @@ import (
 
 const MaxLimit = 100
 
+// FeedItem 是 Feed 页面需要展示的一条视频卡片数据。
 type FeedItem struct {
 	VideoID         int64
 	AuthorID        int64
@@ -22,11 +23,13 @@ type FeedItem struct {
 	PublishedAt     time.Time
 }
 
+// TimelineCursor 保存时间线分页所需的排序字段。
 type TimelineCursor struct {
 	PublishedAt time.Time
 	VideoID     int64
 }
 
+// RestoreFeedItem 从查询结果恢复 FeedItem，并清洗展示用字符串。
 func RestoreFeedItem(videoID int64, authorID int64, authorNickname string, authorAvatarURL string, title string, description string, mediaURL string, coverURL string, likeCount int, commentCount int, favoriteCount int, publishedAt time.Time) *FeedItem {
 	return &FeedItem{
 		VideoID:         videoID,

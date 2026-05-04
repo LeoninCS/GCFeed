@@ -9,7 +9,9 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+// New 创建 MySQL 连接池，并用 Ping 提前验证配置是否可用。
 func New(dbcfg infraconfig.DatabaseConfig) (*sql.DB, error) {
+	// parseTime=true 让 DATETIME/TIMESTAMP 自动映射为 time.Time。
 	dsn := fmt.Sprintf(
 		"%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=true&loc=Local",
 		dbcfg.User,
@@ -24,6 +26,7 @@ func New(dbcfg infraconfig.DatabaseConfig) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// 小项目使用固定连接池参数，后续可按压测结果调整。
 	db.SetMaxIdleConns(10)
 	db.SetMaxOpenConns(50)
 

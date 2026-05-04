@@ -15,10 +15,12 @@ type Handler struct {
 	service *applicationfeed.Service
 }
 
-func NewHandler(service *applicationfeed.Service) *Handler {
+// New 注入 Feed 应用服务。
+func New(service *applicationfeed.Service) *Handler {
 	return &Handler{service: service}
 }
 
+// Timeline 读取时间线 Feed，cursor 和 limit 来自 query 参数。
 func (h *Handler) Timeline(c *gin.Context) {
 	limit, err := parseLimit(c.Query("limit"))
 	if err != nil {
@@ -35,6 +37,7 @@ func (h *Handler) Timeline(c *gin.Context) {
 	c.JSON(http.StatusOK, timelineFeedResponseFromResult(result))
 }
 
+// Refresh 从第一页重新读取 Feed，适合下拉刷新语义。
 func (h *Handler) Refresh(c *gin.Context) {
 	limit, err := parseLimit(c.Query("limit"))
 	if err != nil {
@@ -51,6 +54,7 @@ func (h *Handler) Refresh(c *gin.Context) {
 	c.JSON(http.StatusOK, timelineFeedResponseFromResult(result))
 }
 
+// parseLimit 只校验用户传入的 limit，默认值交给应用服务处理。
 func parseLimit(raw string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -64,6 +68,7 @@ func parseLimit(raw string) (int, error) {
 	return limit, nil
 }
 
+// timelineFeedResponseFromResult 把应用层 Feed 结果转换为 HTTP 响应结构。
 func timelineFeedResponseFromResult(result *applicationfeed.TimelineFeedResult) timelineFeedResponse {
 	items := make([]feedItemResponse, 0, len(result.Items))
 	for _, item := range result.Items {
@@ -89,6 +94,7 @@ func timelineFeedResponseFromResult(result *applicationfeed.TimelineFeedResult) 
 	}
 }
 
+// writeFeedError 统一 Feed 接口错误响应。
 func writeFeedError(c *gin.Context, err error) {
 	if isBadRequestError(err) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -97,6 +103,7 @@ func writeFeedError(c *gin.Context, err error) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 }
 
+// isBadRequestError 判断 Feed 参数错误。
 func isBadRequestError(err error) bool {
 	return errors.Is(err, domainfeed.ErrInvalidLimit) ||
 		errors.Is(err, domainfeed.ErrInvalidCursor)

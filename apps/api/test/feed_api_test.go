@@ -36,6 +36,7 @@ type feedItemAPIResponse struct {
 	PublishedAt     time.Time `json:"published_at"`
 }
 
+// memoryFeedRepo 是 Feed 测试用内存仓储，模拟时间线排序和游标分页。
 type memoryFeedRepo struct {
 	mu    sync.Mutex
 	items []*domainfeed.FeedItem
@@ -45,12 +46,14 @@ func newMemoryFeedRepo(items []*domainfeed.FeedItem) *memoryFeedRepo {
 	return &memoryFeedRepo{items: items}
 }
 
+// ListTimelineFeed 模拟真实仓储的 published_at DESC, video_id DESC 排序。
 func (r *memoryFeedRepo) ListTimelineFeed(ctx context.Context, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	items := make([]*domainfeed.FeedItem, 0, len(r.items))
 	for _, item := range r.items {
+		// cursor 代表上一页最后一条数据，下一页从它之后开始。
 		if cursor == nil || item.PublishedAt.Before(cursor.PublishedAt) || (item.PublishedAt.Equal(cursor.PublishedAt) && item.VideoID < cursor.VideoID) {
 			items = append(items, cloneFeedItem(item))
 		}
@@ -68,6 +71,7 @@ func (r *memoryFeedRepo) ListTimelineFeed(ctx context.Context, cursor *domainfee
 	return items[:limit], nil
 }
 
+// TestFeedAPIFlow 覆盖 Feed 首页、下一页游标和刷新读取。
 func TestFeedAPIFlow(t *testing.T) {
 	router := newFeedRouter(seedFeedItems())
 
@@ -105,6 +109,7 @@ func TestFeedAPIFlow(t *testing.T) {
 	}
 }
 
+// TestFeedAPIValidation 覆盖 limit 和 cursor 参数校验。
 func TestFeedAPIValidation(t *testing.T) {
 	router := newFeedRouter(seedFeedItems())
 
@@ -115,13 +120,14 @@ func TestFeedAPIValidation(t *testing.T) {
 	requireStatus(t, badCursorResponse, http.StatusBadRequest)
 }
 
+// newFeedRouter 只装配 Feed 路由，测试时无需数据库。
 func newFeedRouter(items []*domainfeed.FeedItem) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 
 	repo := newMemoryFeedRepo(items)
-	service := applicationfeed.NewService(repo)
-	handler := interfaceshttpfeed.NewHandler(service)
+	service := applicationfeed.New(repo)
+	handler := interfaceshttpfeed.New(service)
 
 	api := router.Group("/api")
 	api.GET("/feed-items", handler.Timeline)
@@ -129,6 +135,7 @@ func newFeedRouter(items []*domainfeed.FeedItem) *gin.Engine {
 	return router
 }
 
+// seedFeedItems 准备三条不同发布时间的视频，用于验证排序和分页。
 func seedFeedItems() []*domainfeed.FeedItem {
 	base := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
 	return []*domainfeed.FeedItem{
@@ -138,6 +145,7 @@ func seedFeedItems() []*domainfeed.FeedItem {
 	}
 }
 
+// cloneFeedItem 返回 FeedItem 副本，隔离仓储内部数据。
 func cloneFeedItem(item *domainfeed.FeedItem) *domainfeed.FeedItem {
 	cloned := *item
 	return &cloned

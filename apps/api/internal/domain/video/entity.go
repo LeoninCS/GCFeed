@@ -16,6 +16,7 @@ const (
 	MaxIdempotencyKeyLength = 128
 )
 
+// Video 是视频聚合根，包含内容信息、发布状态和统计快照。
 type Video struct {
 	ID             int64
 	AuthorID       int64
@@ -33,6 +34,7 @@ type Video struct {
 	IdempotencyKey string
 }
 
+// NewPublished 创建一个直接发布的视频，适合当前项目的发布流程。
 func NewPublished(authorID int64, title, description, mediaURL, coverURL, idempotencyKey string) (*Video, error) {
 	if authorID <= 0 {
 		return nil, ErrInvalidAuthorID
@@ -64,6 +66,7 @@ func NewPublished(authorID int64, title, description, mediaURL, coverURL, idempo
 	}
 
 	now := time.Now()
+	// 新建视频直接进入 Published 状态，同时记录发布时间用于 Feed 排序。
 	return &Video{
 		AuthorID:       authorID,
 		Title:          title,
@@ -76,6 +79,7 @@ func NewPublished(authorID int64, title, description, mediaURL, coverURL, idempo
 	}, nil
 }
 
+// RestoreVideo 从数据库查询结果恢复领域对象，统计字段来自 video_stat 表。
 func RestoreVideo(
 	id int64,
 	authorID int64,
@@ -119,6 +123,7 @@ func RestoreVideo(
 	}
 }
 
+// DeleteBy 执行作者权限校验并把视频置为删除状态。
 func (v *Video) DeleteBy(authorID int64) error {
 	if authorID <= 0 {
 		return ErrInvalidAuthorID
@@ -126,6 +131,7 @@ func (v *Video) DeleteBy(authorID int64) error {
 	if v.AuthorID != authorID {
 		return ErrVideoPermissionDenied
 	}
+	// 删除采用软删除，保留原始记录用于审计、统计或后续恢复。
 	if v.Status == StatusDeleted {
 		return nil
 	}

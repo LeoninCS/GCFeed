@@ -14,10 +14,12 @@ const defaultFeedLimit = 20
 
 var ErrLoadFeedFailed = errors.New("failed to load feed")
 
+// Service 提供 Feed 读取用例，目前按发布时间倒序返回时间线。
 type Service struct {
 	repo domainfeed.Repository
 }
 
+// TimelineFeedResult 是游标分页结果，NextCursor 供客户端请求下一页。
 type TimelineFeedResult struct {
 	Items      []*domainfeed.FeedItem
 	NextCursor string
@@ -29,10 +31,12 @@ type timelineCursorPayload struct {
 	VideoID     int64  `json:"video_id"`
 }
 
-func NewService(repo domainfeed.Repository) *Service {
+// New 注入 Feed 仓储，应用层依赖领域仓储接口。
+func New(repo domainfeed.Repository) *Service {
 	return &Service{repo: repo}
 }
 
+// GetTimelineFeed 使用 cursor+limit 读取时间线 Feed。
 func (s *Service) GetTimelineFeed(ctx context.Context, cursor string, limit int) (*TimelineFeedResult, error) {
 	parsedCursor, err := parseTimelineCursor(cursor)
 	if err != nil {
@@ -45,6 +49,7 @@ func (s *Service) GetTimelineFeed(ctx context.Context, cursor string, limit int)
 		return nil, ErrLoadFeedFailed
 	}
 
+	// limit+1 是常见分页技巧：多取一条即可判断后面还有没有数据。
 	hasMore := len(items) > limit
 	if hasMore {
 		items = items[:limit]
@@ -52,6 +57,7 @@ func (s *Service) GetTimelineFeed(ctx context.Context, cursor string, limit int)
 
 	nextCursor := ""
 	if len(items) > 0 {
+		// 下一页从当前页最后一个元素之后开始，游标保存排序所需的两个字段。
 		nextCursor = encodeTimelineCursor(&domainfeed.TimelineCursor{
 			PublishedAt: items[len(items)-1].PublishedAt,
 			VideoID:     items[len(items)-1].VideoID,
@@ -65,10 +71,12 @@ func (s *Service) GetTimelineFeed(ctx context.Context, cursor string, limit int)
 	}, nil
 }
 
+// RefreshTimelineFeed 从第一页重新加载 Feed，适合下拉刷新场景。
 func (s *Service) RefreshTimelineFeed(ctx context.Context, limit int) (*TimelineFeedResult, error) {
 	return s.GetTimelineFeed(ctx, "", limit)
 }
 
+// normalizeLimit 统一默认页大小和最大页大小。
 func normalizeLimit(limit int) int {
 	if limit <= 0 {
 		return defaultFeedLimit
@@ -79,6 +87,7 @@ func normalizeLimit(limit int) int {
 	return limit
 }
 
+// parseTimelineCursor 将客户端传回的字符串游标解析成领域游标。
 func parseTimelineCursor(raw string) (*domainfeed.TimelineCursor, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -109,6 +118,7 @@ func parseTimelineCursor(raw string) (*domainfeed.TimelineCursor, error) {
 	}, nil
 }
 
+// encodeTimelineCursor 把排序字段编码成 URL 安全的游标字符串。
 func encodeTimelineCursor(cursor *domainfeed.TimelineCursor) string {
 	if cursor == nil || cursor.VideoID <= 0 || cursor.PublishedAt.IsZero() {
 		return ""

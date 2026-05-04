@@ -34,6 +34,7 @@ type accountTokenResponse struct {
 	ExpiresInSeconds int64  `json:"expires_in_seconds"`
 }
 
+// memoryAccountRepo 是账号测试用的内存仓储，模拟真实 Repository 的唯一账号索引。
 type memoryAccountRepo struct {
 	mu        sync.Mutex
 	nextID    int64
@@ -49,6 +50,7 @@ func newMemoryAccountRepo() *memoryAccountRepo {
 	}
 }
 
+// Save 模拟 account 表插入逻辑，并在账号重复时返回领域错误。
 func (r *memoryAccountRepo) Save(ctx context.Context, user *domainaccount.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -64,6 +66,7 @@ func (r *memoryAccountRepo) Save(ctx context.Context, user *domainaccount.User) 
 	return nil
 }
 
+// FindByAccount 模拟登录时按账号查询用户。
 func (r *memoryAccountRepo) FindByAccount(ctx context.Context, account string) (*domainaccount.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -75,6 +78,7 @@ func (r *memoryAccountRepo) FindByAccount(ctx context.Context, account string) (
 	return cloneUser(r.byID[id]), nil
 }
 
+// FindByID 模拟根据 token 中的用户 ID 查询个人资料。
 func (r *memoryAccountRepo) FindByID(ctx context.Context, id int64) (*domainaccount.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -86,6 +90,7 @@ func (r *memoryAccountRepo) FindByID(ctx context.Context, id int64) (*domainacco
 	return cloneUser(user), nil
 }
 
+// UpdateProfile 只更新资料字段，与真实仓储保持同样的行为边界。
 func (r *memoryAccountRepo) UpdateProfile(ctx context.Context, user *domainaccount.User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -100,11 +105,13 @@ func (r *memoryAccountRepo) UpdateProfile(ctx context.Context, user *domainaccou
 	return nil
 }
 
+// cloneUser 返回副本，避免测试代码直接修改仓储中的内部对象。
 func cloneUser(user *domainaccount.User) *domainaccount.User {
 	cloned := *user
 	return &cloned
 }
 
+// TestAccountAPIFlow 覆盖注册、重复注册、登录、读取资料、更新资料和登出完整流程。
 func TestAccountAPIFlow(t *testing.T) {
 	router := newAccountRouter(t)
 
@@ -178,6 +185,7 @@ func TestAccountAPIFlow(t *testing.T) {
 	requireStatus(t, logoutResponse, http.StatusNoContent)
 }
 
+// TestAccountAPIValidation 覆盖账号接口的常见参数错误和未登录访问。
 func TestAccountAPIValidation(t *testing.T) {
 	router := newAccountRouter(t)
 
@@ -217,6 +225,7 @@ func TestAccountAPIValidation(t *testing.T) {
 	requireStatus(t, emptyNicknameResponse, http.StatusBadRequest)
 }
 
+// registerAndLogin 为需要登录态的测试准备可用 access token。
 func registerAndLogin(t *testing.T, router *gin.Engine) string {
 	t.Helper()
 
@@ -246,6 +255,7 @@ func registerAndLogin(t *testing.T, router *gin.Engine) string {
 	return token.AccessToken
 }
 
+// newAccountRouter 只装配账号相关路由，使测试聚焦账号模块。
 func newAccountRouter(t *testing.T) *gin.Engine {
 	t.Helper()
 
@@ -257,11 +267,12 @@ func newAccountRouter(t *testing.T) *gin.Engine {
 		t.Fatalf("new jwt manager: %v", err)
 	}
 	repo := newMemoryAccountRepo()
-	service := applicationaccount.NewService(repo, jwtManager)
-	handler := interfaceshttpaccount.NewHandler(service)
+	service := applicationaccount.New(repo, jwtManager)
+	handler := interfaceshttpaccount.New(service)
 	authMiddleware := interfaceshttpmiddleware.NewJWTAuth(jwtManager)
 
 	api := router.Group("/api")
+	// 测试路由保持和正式 RESTful 路由一致，便于测试覆盖真实接口路径。
 	sessions := api.Group("/sessions")
 	sessions.POST("", handler.Login)
 	sessions.DELETE("/current", authMiddleware, handler.Logout)
@@ -274,6 +285,7 @@ func newAccountRouter(t *testing.T) *gin.Engine {
 	return router
 }
 
+// performJSONRequest 构造 JSON 请求，并在需要时附加 Bearer token。
 func performJSONRequest(router *gin.Engine, method, path, body, accessToken string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	if body != "" {
@@ -288,6 +300,7 @@ func performJSONRequest(router *gin.Engine, method, path, body, accessToken stri
 	return resp
 }
 
+// decodeJSON 解码响应体，失败时输出原始响应内容便于定位问题。
 func decodeJSON(t *testing.T, resp *httptest.ResponseRecorder, target any) {
 	t.Helper()
 
@@ -296,6 +309,7 @@ func decodeJSON(t *testing.T, resp *httptest.ResponseRecorder, target any) {
 	}
 }
 
+// requireStatus 统一断言 HTTP 状态码，失败时把响应体一并打印出来。
 func requireStatus(t *testing.T, resp *httptest.ResponseRecorder, expected int) {
 	t.Helper()
 

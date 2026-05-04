@@ -14,12 +14,14 @@ type Handler struct {
 	service *applicationaccount.Service
 }
 
-func NewHandler(service *applicationaccount.Service) *Handler {
+// New 注入账号应用服务，Handler 只处理 HTTP 输入输出。
+func New(service *applicationaccount.Service) *Handler {
 	return &Handler{
 		service: service,
 	}
 }
 
+// Register 处理用户注册请求，成功后返回新用户资料。
 func (h *Handler) Register(c *gin.Context) {
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -27,6 +29,7 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
+	// 具体注册规则在应用层和领域层执行，HTTP 层只传递请求字段。
 	profile, err := h.service.Register(c.Request.Context(), req.Account, req.Password, req.Nickname)
 	if err != nil {
 		if isBadRequestError(err) {
@@ -44,6 +47,7 @@ func (h *Handler) Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, profileResponse(profile))
 }
 
+// Login 处理账号密码登录，成功后返回 Bearer token。
 func (h *Handler) Login(c *gin.Context) {
 	var req LoginByPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -51,6 +55,7 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
+	// 登录失败统一映射为 401，避免暴露账号是否存在。
 	token, err := h.service.Login(c.Request.Context(), req.Account, req.Password)
 	if err != nil {
 		if isBadRequestError(err) {
@@ -72,10 +77,12 @@ func (h *Handler) Login(c *gin.Context) {
 	})
 }
 
+// Logout 当前项目使用无状态 JWT，服务端无需清理会话数据。
 func (h *Handler) Logout(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// Me 读取当前登录用户资料，用户 ID 来自 JWT 中间件写入的上下文。
 func (h *Handler) Me(c *gin.Context) {
 	userID, ok := userIDFromContext(c)
 	if !ok {
@@ -92,6 +99,7 @@ func (h *Handler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, profileResponse(profile))
 }
 
+// UpdateMe 更新当前登录用户资料，请求体支持部分字段更新。
 func (h *Handler) UpdateMe(c *gin.Context) {
 	userID, ok := userIDFromContext(c)
 	if !ok {
@@ -114,6 +122,7 @@ func (h *Handler) UpdateMe(c *gin.Context) {
 	c.JSON(http.StatusOK, profileResponse(profile))
 }
 
+// profileResponse 将应用层 Profile 转成对外 JSON 结构。
 func profileResponse(profile *applicationaccount.Profile) userProfileResponse {
 	return userProfileResponse{
 		ID:        profile.ID,
@@ -126,6 +135,7 @@ func profileResponse(profile *applicationaccount.Profile) userProfileResponse {
 	}
 }
 
+// userIDFromContext 从 JWT 中间件写入的上下文中读取登录用户 ID。
 func userIDFromContext(c *gin.Context) (int64, bool) {
 	value, exists := c.Get(interfaceshttpmiddleware.ContextUserIDKey)
 	if !exists {
@@ -135,6 +145,7 @@ func userIDFromContext(c *gin.Context) (int64, bool) {
 	return userID, ok && userID > 0
 }
 
+// writeProfileError 统一账号资料相关接口的错误响应。
 func writeProfileError(c *gin.Context, err error) {
 	if isBadRequestError(err) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -147,6 +158,7 @@ func writeProfileError(c *gin.Context, err error) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 }
 
+// isBadRequestError 判断哪些领域错误属于客户端请求参数问题。
 func isBadRequestError(err error) bool {
 	return errors.Is(err, domainaccount.ErrEmptyAccount) ||
 		errors.Is(err, domainaccount.ErrEmptyPassword) ||

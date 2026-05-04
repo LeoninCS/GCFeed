@@ -15,15 +15,17 @@ type Service struct {
 	repo domainvideo.Repository
 }
 
+// CreateResult 同时表达“返回哪个视频”和“这次请求是否真的创建了新记录”。
 type CreateResult struct {
 	Video   *domainvideo.Video
 	Created bool
 }
 
-func NewService(repo domainvideo.Repository) *Service {
+func New(repo domainvideo.Repository) *Service {
 	return &Service{repo: repo}
 }
 
+// CreatePublished 创建已发布视频；Idempotency-Key 命中时返回已有视频。
 func (s *Service) CreatePublished(ctx context.Context, authorID int64, title, description, mediaURL, coverURL, idempotencyKey string) (*CreateResult, error) {
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if len(idempotencyKey) > domainvideo.MaxIdempotencyKeyLength {
@@ -31,6 +33,7 @@ func (s *Service) CreatePublished(ctx context.Context, authorID int64, title, de
 	}
 
 	if idempotencyKey != "" {
+		// 客户端重试同一次创建请求时，先通过作者和幂等键找回原视频。
 		existing, err := s.repo.FindByAuthorAndIdempotencyKey(ctx, authorID, idempotencyKey)
 		if err == nil {
 			return &CreateResult{Video: existing, Created: false}, nil
@@ -47,6 +50,7 @@ func (s *Service) CreatePublished(ctx context.Context, authorID int64, title, de
 
 	if err := s.repo.Save(ctx, video); err != nil {
 		if idempotencyKey != "" && errors.Is(err, domainvideo.ErrDuplicateIdempotencyKey) {
+			// 并发创建可能先查不到、后插入冲突；冲突后再查一次即可返回一致结果。
 			existing, loadErr := s.repo.FindByAuthorAndIdempotencyKey(ctx, authorID, idempotencyKey)
 			if loadErr == nil {
 				return &CreateResult{Video: existing, Created: false}, nil
@@ -59,6 +63,7 @@ func (s *Service) CreatePublished(ctx context.Context, authorID int64, title, de
 	return &CreateResult{Video: video, Created: true}, nil
 }
 
+// Get 只返回已发布视频，删除或下线的视频在公开详情里表现为找不到。
 func (s *Service) Get(ctx context.Context, videoID int64) (*domainvideo.Video, error) {
 	if videoID <= 0 {
 		return nil, domainvideo.ErrInvalidVideoID
@@ -74,6 +79,7 @@ func (s *Service) Get(ctx context.Context, videoID int64) (*domainvideo.Video, e
 	return video, nil
 }
 
+// ListByAuthor 查询某个作者公开发布的视频列表，使用 offset 分页。
 func (s *Service) ListByAuthor(ctx context.Context, authorID int64, limit, offset int) ([]*domainvideo.Video, error) {
 	if authorID <= 0 {
 		return nil, domainvideo.ErrInvalidAuthorID
@@ -85,6 +91,7 @@ func (s *Service) ListByAuthor(ctx context.Context, authorID int64, limit, offse
 		return nil, domainvideo.ErrInvalidOffset
 	}
 	if limit > 100 {
+		// 后端限制最大页大小，避免一次请求拉取过多数据。
 		limit = 100
 	}
 
@@ -95,6 +102,7 @@ func (s *Service) ListByAuthor(ctx context.Context, authorID int64, limit, offse
 	return videos, nil
 }
 
+// Delete 执行视频软删除，只有作者本人可以删除自己的视频。
 func (s *Service) Delete(ctx context.Context, authorID, videoID int64) error {
 	if authorID <= 0 {
 		return domainvideo.ErrInvalidAuthorID
@@ -110,6 +118,7 @@ func (s *Service) Delete(ctx context.Context, authorID, videoID int64) error {
 		}
 		return ErrLoadVideoFailed
 	}
+	// 软删除接口保持幂等：已经删除的视频再次删除仍然返回成功。
 	alreadyDeleted := video.Status == domainvideo.StatusDeleted
 	if err := video.DeleteBy(authorID); err != nil {
 		return err

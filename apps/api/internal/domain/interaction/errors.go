@@ -2,6 +2,7 @@ package domaininteraction
 
 import "errors"
 
+// 互动领域错误覆盖点赞、收藏、评论和权限判断的业务失败原因。
 var ErrInvalidUserID = errors.New("user id must be positive")
 var ErrInvalidVideoID = errors.New("video id must be positive")
 var ErrInvalidCommentID = errors.New("comment id must be positive")

@@ -2,6 +2,7 @@ package domainvideo
 
 import "errors"
 
+// 视频领域错误描述业务规则失败原因，应用层和 HTTP 层基于这些错误做转换。
 var ErrInvalidVideoID = errors.New("video id must be positive")
 var ErrInvalidAuthorID = errors.New("author id must be positive")
 var ErrEmptyTitle = errors.New("title is required")

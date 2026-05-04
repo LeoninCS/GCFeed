@@ -12,6 +12,7 @@ const (
 	StatusNormal = 1
 )
 
+// User 是账号聚合根，保存登录凭证、展示资料和权限角色。
 type User struct {
 	ID        int64
 	Account   string
@@ -23,6 +24,7 @@ type User struct {
 	Role      string
 }
 
+// New 创建新用户，负责输入清洗、必填校验和密码哈希。
 func New(account, password, nickname string) (*User, error) {
 	account = strings.TrimSpace(account)
 	password = strings.TrimSpace(password)
@@ -38,6 +40,7 @@ func New(account, password, nickname string) (*User, error) {
 		return nil, ErrEmptyNickname
 	}
 
+	// 密码只保存 bcrypt 哈希，数据库中不会保存明文密码。
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, ErrHashPasswordFailed
@@ -52,6 +55,7 @@ func New(account, password, nickname string) (*User, error) {
 	}, nil
 }
 
+// RestoreUser 从数据库记录恢复领域对象，读取路径无需再次执行注册校验。
 func RestoreUser(id int64, account, password, nickname, avatarURL, bio string, status int, role string) *User {
 	account = strings.TrimSpace(account)
 	password = strings.TrimSpace(password)
@@ -63,6 +67,7 @@ func RestoreUser(id int64, account, password, nickname, avatarURL, bio string, s
 		status = StatusNormal
 	}
 	if role == "" {
+		// 老数据或测试数据没有角色时，按普通用户处理。
 		role = RoleUser
 	}
 
@@ -78,6 +83,7 @@ func RestoreUser(id int64, account, password, nickname, avatarURL, bio string, s
 	}
 }
 
+// Authenticate 校验用户输入密码是否匹配已保存的 bcrypt 哈希。
 func (u *User) Authenticate(password string) error {
 	password = strings.TrimSpace(password)
 	if password == "" {
@@ -89,6 +95,7 @@ func (u *User) Authenticate(password string) error {
 	return nil
 }
 
+// UpdateProfile 执行资料部分更新，指针为 nil 表示该字段保持原值。
 func (u *User) UpdateProfile(nickname, avatarURL, bio *string) error {
 	if nickname == nil && avatarURL == nil && bio == nil {
 		return ErrEmptyProfileUpdate

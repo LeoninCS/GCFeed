@@ -2,6 +2,7 @@ package domainaccount
 
 import "errors"
 
+// 账号领域错误集中放在领域层，HTTP 层会把它们映射为对应状态码。
 var ErrEmptyAccount = errors.New("account is required")
 var ErrEmptyPassword = errors.New("password is required")
 var ErrEmptyNickname = errors.New("nickname is required")

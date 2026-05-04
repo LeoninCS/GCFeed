@@ -42,6 +42,7 @@ type videoListAPIResponse struct {
 	Offset int                `json:"offset"`
 }
 
+// memoryVideoRepo 是视频测试用的内存仓储，模拟发布、查询、幂等和软删除。
 type memoryVideoRepo struct {
 	mu            sync.Mutex
 	nextID        int64
@@ -57,6 +58,7 @@ func newMemoryVideoRepo() *memoryVideoRepo {
 	}
 }
 
+// Save 模拟视频创建，并维护作者+幂等键的唯一约束。
 func (r *memoryVideoRepo) Save(ctx context.Context, video *domainvideo.Video) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -64,6 +66,7 @@ func (r *memoryVideoRepo) Save(ctx context.Context, video *domainvideo.Video) er
 	if video.IdempotencyKey != "" {
 		key := memoryVideoIdempotencyKey(video.AuthorID, video.IdempotencyKey)
 		if _, exists := r.byIdempotency[key]; exists {
+			// 与真实数据库唯一键冲突保持同样错误，方便测试应用层重试逻辑。
 			return domainvideo.ErrDuplicateIdempotencyKey
 		}
 	}
@@ -82,6 +85,7 @@ func (r *memoryVideoRepo) Save(ctx context.Context, video *domainvideo.Video) er
 	return nil
 }
 
+// FindByID 只返回已发布视频，模拟公开详情接口的可见性规则。
 func (r *memoryVideoRepo) FindByID(ctx context.Context, id int64) (*domainvideo.Video, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -93,6 +97,7 @@ func (r *memoryVideoRepo) FindByID(ctx context.Context, id int64) (*domainvideo.
 	return cloneVideo(video), nil
 }
 
+// FindByIDAnyStatus 返回任意状态视频，删除流程需要读取已删除状态。
 func (r *memoryVideoRepo) FindByIDAnyStatus(ctx context.Context, id int64) (*domainvideo.Video, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -104,6 +109,7 @@ func (r *memoryVideoRepo) FindByIDAnyStatus(ctx context.Context, id int64) (*dom
 	return cloneVideo(video), nil
 }
 
+// FindByAuthorAndIdempotencyKey 模拟发布接口通过幂等键找回已有视频。
 func (r *memoryVideoRepo) FindByAuthorAndIdempotencyKey(ctx context.Context, authorID int64, key string) (*domainvideo.Video, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -115,6 +121,7 @@ func (r *memoryVideoRepo) FindByAuthorAndIdempotencyKey(ctx context.Context, aut
 	return cloneVideo(r.byID[id]), nil
 }
 
+// ListByAuthor 模拟作者作品列表，按发布时间和 ID 倒序排序。
 func (r *memoryVideoRepo) ListByAuthor(ctx context.Context, authorID int64, limit, offset int) ([]*domainvideo.Video, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -144,6 +151,7 @@ func (r *memoryVideoRepo) ListByAuthor(ctx context.Context, authorID int64, limi
 	return videos[offset:end], nil
 }
 
+// UpdateStatus 模拟视频状态更新，当前用于软删除。
 func (r *memoryVideoRepo) UpdateStatus(ctx context.Context, video *domainvideo.Video) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -157,6 +165,7 @@ func (r *memoryVideoRepo) UpdateStatus(ctx context.Context, video *domainvideo.V
 	return nil
 }
 
+// TestVideoAPIFlow 覆盖视频发布、幂等重放、详情、列表、删除和重复删除。
 func TestVideoAPIFlow(t *testing.T) {
 	router, jwtManager := newVideoRouter(t)
 	token := signTestToken(t, jwtManager, 42)
@@ -236,6 +245,7 @@ func TestVideoAPIFlow(t *testing.T) {
 	}
 }
 
+// TestVideoAPIValidation 覆盖未登录、参数错误、资源缺失和权限错误。
 func TestVideoAPIValidation(t *testing.T) {
 	router, jwtManager := newVideoRouter(t)
 	token := signTestToken(t, jwtManager, 42)
@@ -287,6 +297,7 @@ func TestVideoAPIValidation(t *testing.T) {
 	requireStatus(t, badPaginationResponse, http.StatusBadRequest)
 }
 
+// newVideoRouter 只装配视频相关路由，便于视频模块独立测试。
 func newVideoRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	t.Helper()
 
@@ -299,8 +310,8 @@ func newVideoRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	}
 
 	repo := newMemoryVideoRepo()
-	service := applicationvideo.NewService(repo)
-	handler := interfaceshttpvideo.NewHandler(service)
+	service := applicationvideo.New(repo)
+	handler := interfaceshttpvideo.New(service)
 	authMiddleware := interfaceshttpmiddleware.NewJWTAuth(jwtManager)
 
 	api := router.Group("/api")
@@ -315,6 +326,7 @@ func newVideoRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	return router, jwtManager
 }
 
+// signTestToken 生成测试用 access token，让接口走真实 JWT 中间件。
 func signTestToken(t *testing.T, jwtManager *infrajwt.Manager, userID int64) string {
 	t.Helper()
 
@@ -325,6 +337,7 @@ func signTestToken(t *testing.T, jwtManager *infrajwt.Manager, userID int64) str
 	return token
 }
 
+// performVideoJSONRequest 构造视频接口请求，并支持附加幂等键。
 func performVideoJSONRequest(router *gin.Engine, method, path, body, accessToken, idempotencyKey string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
 	if body != "" {
@@ -342,6 +355,7 @@ func performVideoJSONRequest(router *gin.Engine, method, path, body, accessToken
 	return resp
 }
 
+// cloneVideo 返回视频副本，并复制发布时间指针指向的值。
 func cloneVideo(video *domainvideo.Video) *domainvideo.Video {
 	cloned := *video
 	if video.PublishedAt != nil {
@@ -351,10 +365,12 @@ func cloneVideo(video *domainvideo.Video) *domainvideo.Video {
 	return &cloned
 }
 
+// memoryVideoIdempotencyKey 模拟数据库里的作者+幂等键唯一索引。
 func memoryVideoIdempotencyKey(authorID int64, key string) string {
 	return fmt.Sprintf("%d:%s", authorID, key)
 }
 
+// publishedAtUnix 用于内存列表排序，空发布时间排到最后。
 func publishedAtUnix(video *domainvideo.Video) int64 {
 	if video.PublishedAt == nil {
 		return 0

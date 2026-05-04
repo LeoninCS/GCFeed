@@ -24,7 +24,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// Register 负责后端依赖装配：数据库模型、仓储、Service、Handler、中间件和路由。
 func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
+	// database/sql 连接池交给 GORM 复用，避免维护两套数据库连接。
 	gormDB, err := gorm.Open(gormmysql.New(gormmysql.Config{
 		Conn: db,
 	}), &gorm.Config{})
@@ -32,6 +34,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 		return err
 	}
 
+	// AutoMigrate 根据模型创建或补齐表结构，适合教学项目快速启动。
 	if err := gormDB.AutoMigrate(
 		&infraaccount.UserModel{},
 		&infravideo.VideoModel{},
@@ -45,35 +48,41 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 		return err
 	}
 
+	// JWT Manager 同时被账号服务用于签发 token，也被鉴权中间件用于校验 token。
 	jwtManager, err := infrajwt.NewManager(cfg.JWT.Secret, cfg.JWT.AccessTTL)
 	if err != nil {
 		return err
 	}
 
+	// 下面按领域模块组装依赖：Repository -> Service -> Handler。
 	accountRepo := infraaccount.New(gormDB)
-	accountService := applicationaccount.NewService(accountRepo, jwtManager)
-	accountHandler := interfaceshttpaccount.NewHandler(accountService)
+	accountService := applicationaccount.New(accountRepo, jwtManager)
+	accountHandler := interfaceshttpaccount.New(accountService)
 	videoRepo := infravideo.New(gormDB)
-	videoService := applicationvideo.NewService(videoRepo)
-	videoHandler := interfaceshttpvideo.NewHandler(videoService)
+	videoService := applicationvideo.New(videoRepo)
+	videoHandler := interfaceshttpvideo.New(videoService)
 	feedRepo := infrafeed.New(gormDB)
-	feedService := applicationfeed.NewService(feedRepo)
-	feedHandler := interfaceshttpfeed.NewHandler(feedService)
+	feedService := applicationfeed.New(feedRepo)
+	feedHandler := interfaceshttpfeed.New(feedService)
 	interactionRepo := infrainteraction.New(gormDB)
-	interactionService := applicationinteraction.NewService(interactionRepo)
-	interactionHandler := interfaceshttpinteraction.NewHandler(interactionService)
-	uploadHandler := interfaceshttpupload.NewHandler("./uploads")
+	interactionService := applicationinteraction.New(interactionRepo)
+	interactionHandler := interfaceshttpinteraction.New(interactionService)
+	uploadHandler := interfaceshttpupload.New("./uploads")
 
 	g.GET("/health", HealthCheck)
+	// 静态文件路由让上传后的文件可以通过 /uploads/... 访问。
 	g.Static("/uploads", "./uploads")
 
 	authMiddleware := interfaceshttpmiddleware.NewJWTAuth(jwtManager)
 	api := g.Group("/api")
 
+	// RESTful 路由约定：路径表达资源，HTTP 方法表达动作。
+	// 会话资源用于登录态：创建会话表示登录，删除当前会话表示登出。
 	sessions := api.Group("/sessions")
 	sessions.POST("", accountHandler.Login)
 	sessions.DELETE("/current", authMiddleware, accountHandler.Logout)
 
+	// 用户资源承载注册、当前用户资料和用户作品列表。
 	users := api.Group("/users")
 	users.POST("", accountHandler.Register)
 	users.GET("/me", authMiddleware, accountHandler.Me)
@@ -81,6 +90,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	users.GET("/me/videos", authMiddleware, videoHandler.ListMine)
 	users.GET("/:userId/videos", videoHandler.ListByAuthor)
 
+	// 视频是互动资源的父资源，点赞、收藏和评论都挂在具体视频下。
 	videos := api.Group("/videos")
 	videos.POST("", authMiddleware, videoHandler.Create)
 	videos.GET("/:videoId", videoHandler.Get)
@@ -95,12 +105,15 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	uploads := api.Group("/uploads", authMiddleware)
 	uploads.POST("", uploadHandler.Create)
 
+	// Feed 暴露为条目集合，客户端通过游标和 limit 控制分页。
 	api.GET("/feed-items", feedHandler.Timeline)
+	// 删除评论只需要评论自身 ID，所以放在顶层 comments 资源下。
 	api.DELETE("/comments/:commentId", authMiddleware, interactionHandler.DeleteComment)
 
 	return nil
 }
 
+// HealthCheck 提供基础健康检查接口，方便本地调试和容器探活。
 func HealthCheck(c *gin.Context) {
 	c.JSON(200, gin.H{
 		"message": "All is well",
