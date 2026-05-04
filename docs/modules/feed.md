@@ -7,14 +7,13 @@
 
 | 方法 | 接口路径 | 作用 | 鉴权 | 幂等键 |
 | --- | --- | --- | --- | --- |
-| GET | `/api/feed/timeline` | 获取按发布时间排序的视频流 | 可匿名 | - |
-| GET | `/api/feed/refresh` | 下拉刷新并返回新游标 | 可匿名 | - |
+| GET | `/api/feed-items` | 获取按发布时间排序的视频流 | 可匿名 | - |
 
-### 2.1 Timeline Feed API
+### 2.1 Feed Items API
 
 用于按视频发布时间倒序返回已上线视频，作为 Feed 策略的基础实现。
 
-#### GET `/api/feed/timeline`
+#### GET `/api/feed-items`
 
 请求参数：
 

@@ -55,15 +55,15 @@
           "raw": "{\n  \"account\": \"test\",\n  \"password\": \"12345678\",\n  \"nickname\": \"tester\"\n}"
         },
         "url": {
-          "raw": "{{scheme}}://{{host}}:{{port}}/auth/register",
+          "raw": "{{scheme}}://{{host}}:{{port}}/api/users",
           "protocol": "{{scheme}}",
           "host": [
             "{{host}}"
           ],
           "port": "{{port}}",
           "path": [
-            "auth",
-            "register"
+            "api",
+            "users"
           ]
         },
         "description": "Register a new account"
@@ -85,15 +85,15 @@
           "raw": "{\n  \"account\": \"test\",\n  \"password\": \"12345678\"\n}"
         },
         "url": {
-          "raw": "{{scheme}}://{{host}}:{{port}}/auth/login",
+          "raw": "{{scheme}}://{{host}}:{{port}}/api/sessions",
           "protocol": "{{scheme}}",
           "host": [
             "{{host}}"
           ],
           "port": "{{port}}",
           "path": [
-            "auth",
-            "login"
+            "api",
+            "sessions"
           ]
         },
         "description": "Login with account and password"

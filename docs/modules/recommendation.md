@@ -7,9 +7,9 @@
 
 | 方法 | 接口路径 | 作用 | 鉴权 | 幂等键 |
 | --- | --- | --- | --- | --- |
-| POST | `/internal/reco/candidates` | 一次完成召回+排序+打散 | 服务鉴权 | 支持 |
-| POST | `/internal/reco/exposure/check` | 校验候选是否近期曝光 | 服务鉴权 | 支持 |
-| POST | `/internal/reco/exposure/commit` | 写入曝光记录 | 服务鉴权 | 支持 |
+| POST | `/internal/recommendation-candidates` | 一次完成召回+排序+打散 | 服务鉴权 | 支持 |
+| POST | `/internal/exposure-decisions` | 校验候选是否近期曝光 | 服务鉴权 | 支持 |
+| POST | `/internal/exposures` | 写入曝光记录 | 服务鉴权 | 支持 |
 
 ## 3. 数据表设计（最小实现）
 

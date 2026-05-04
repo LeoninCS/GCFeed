@@ -8,9 +8,9 @@
 | 方法 | 接口路径 | 作用 | 鉴权 | 幂等键 |
 | --- | --- | --- | --- | --- |
 | POST | `/internal/review/tasks` | 创建审核任务（提交待审） | 服务鉴权 | 支持 |
-| POST | `/internal/review/tasks/{taskId}/agent-result` | 回传 Agent 初审结果 | 服务鉴权 | 支持 |
-| POST | `/api/review/tasks/{taskId}/decision` | 人工审核通过/驳回 | Bearer JWT(运营角色) | 支持 |
-| POST | `/api/review/videos/{videoId}/offline` | 强制下架视频 | Bearer JWT(运营角色) | 支持 |
+| PUT | `/internal/review/tasks/{taskId}/agent-result` | 回传 Agent 初审结果 | 服务鉴权 | 支持 |
+| PUT | `/api/review/tasks/{taskId}/decision` | 人工审核通过/驳回 | Bearer JWT(运营角色) | 支持 |
+| PATCH | `/api/videos/{videoId}` | 强制下架视频 | Bearer JWT(运营角色) | 支持 |
 
 ## 3. 数据表设计（最小实现）
 

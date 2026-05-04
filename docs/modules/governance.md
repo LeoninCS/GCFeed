@@ -7,10 +7,10 @@
 
 | 方法 | 接口路径 | 作用 | 鉴权 | 幂等键 |
 | --- | --- | --- | --- | --- |
-| POST | `/internal/governance/rate-limit/check` | 判断当前请求是否放行 | 服务鉴权 | 支持 |
+| POST | `/internal/rate-limit-decisions` | 判断当前请求是否放行 | 服务鉴权 | 支持 |
 | GET | `/internal/governance/degrade-switches` | 获取降级开关状态 | 服务鉴权 | - |
 | PATCH | `/api/admin/governance/degrade-switches/{key}` | 更新降级开关 | Bearer JWT(管理员) | 支持 |
-| POST | `/internal/governance/dead-letter/retry` | 重试死信任务 | 服务鉴权 | 支持 |
+| POST | `/internal/dead-letter-retries` | 重试死信任务 | 服务鉴权 | 支持 |
 
 ## 3. 数据表设计（最小实现）
 

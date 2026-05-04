@@ -142,7 +142,7 @@ sequenceDiagram
   participant DB as MySQL
   participant FS as uploads
 
-  C->>R: POST /api/auth/register
+  C->>R: POST /api/users
   R->>H: Account.Register
   H->>S: 创建账户
   S->>Repo: Save account
@@ -152,7 +152,7 @@ sequenceDiagram
   S-->>H: 返回 profile
   H-->>C: 201 Created
 
-  C->>R: POST /api/auth/login/password
+  C->>R: POST /api/sessions
   R->>H: Account.Login
   H->>S: 校验账号密码
   S->>Repo: FindByAccount
@@ -177,7 +177,7 @@ sequenceDiagram
   S-->>H: 返回视频详情
   H-->>C: 201 Created
 
-  C->>R: GET /api/feed/timeline?cursor=...&limit=...
+  C->>R: GET /api/feed-items?cursor=...&limit=...
   R->>H: Feed.Timeline
   H->>S: GetTimelineFeed
   S->>Repo: ListTimelineFeed

@@ -7,9 +7,9 @@
 
 | 方法 | 接口路径 | 作用 | 鉴权 | 幂等键 |
 | --- | --- | --- | --- | --- |
-| GET | `/api/playback/config` | 获取端侧播放参数 | Bearer JWT | - |
-| POST | `/api/playback/preload` | 获取预加载视频列表 | Bearer JWT | 支持 |
-| POST | `/internal/playback/qos/report` | 上报首帧/卡顿质量数据 | 服务鉴权 | 支持 |
+| GET | `/api/playback-config` | 获取端侧播放参数 | Bearer JWT | - |
+| GET | `/api/preload-videos` | 获取预加载视频列表 | Bearer JWT | - |
+| POST | `/internal/playback-qos-reports` | 上报首帧/卡顿质量数据 | 服务鉴权 | 支持 |
 
 ## 3. 数据表设计（最小实现）
 

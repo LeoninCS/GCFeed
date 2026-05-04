@@ -8,9 +8,9 @@
 | 方法 | 接口路径 | 作用 | 鉴权 | 幂等键 |
 | --- | --- | --- | --- | --- |
 | GET | `/api/messages` | 拉取消息列表 | Bearer JWT | - |
-| GET | `/api/messages/unread-count` | 获取未读数 | Bearer JWT | - |
-| PATCH | `/api/messages/read` | 批量标记已读 | Bearer JWT | 支持 |
-| POST | `/internal/messages/consume-event` | 消费互动/关注事件并入消息 | 服务鉴权 | 支持 |
+| GET | `/api/message-stats/unread` | 获取未读数 | Bearer JWT | - |
+| PATCH | `/api/messages` | 批量标记已读 | Bearer JWT | 支持 |
+| POST | `/internal/messages` | 消费互动/关注事件并入消息 | 服务鉴权 | 支持 |
 
 ## 3. 数据表设计（最小实现）
 

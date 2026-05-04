@@ -11,6 +11,7 @@
 | GET | `/api/videos/{videoId}` | 查询视频详情 | 可匿名 | - |
 | DELETE | `/api/videos/{videoId}` | 删除视频（软删除） | Bearer JWT | 支持 |
 | GET | `/api/users/{userId}/videos` | 根据用户ID查询作品列表 | 可匿名 | - |
+| GET | `/api/users/me/videos` | 查询我的作品列表 | Bearer JWT | - |
 
 ## 3. 数据表设计（最小实现）
 

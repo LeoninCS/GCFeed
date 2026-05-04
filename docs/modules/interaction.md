@@ -8,7 +8,7 @@
 
 | 模块 | 职责 |
 | --- | --- |
-| `interaction` | 记录点赞、收藏、评论事实，处理 toggle、评论发布和评论删除 |
+| `interaction` | 记录点赞、收藏、评论事实，处理状态变更、评论发布和评论删除 |
 | `video` | 保存视频主体信息 |
 | `video_stat` | 保存 `like_count`、`favorite_count`、`comment_count` 统计字段 |
 | `account` | 提供登录用户身份，评论响应展示用户昵称和头像 |
@@ -26,15 +26,17 @@ apps/api/internal/interfaces/http/interaction/
 
 | 方法 | 接口路径 | 作用 | 鉴权 | 幂等键 |
 | --- | --- | --- | --- | --- |
-| POST | `/api/interactions/likes/toggle` | 点赞/取消点赞 | Bearer JWT | 支持 |
-| POST | `/api/interactions/favorites/toggle` | 收藏/取消收藏 | Bearer JWT | 支持 |
-| POST | `/api/interactions/comments` | 发表评论 | Bearer JWT | 支持 |
-| GET | `/api/interactions/comments` | 获取评论列表 | 可匿名 | - |
-| DELETE | `/api/interactions/comments/{commentId}` | 删除评论 | Bearer JWT | 支持 |
+| PUT | `/api/videos/{videoId}/like` | 点赞视频 | Bearer JWT | 支持 |
+| DELETE | `/api/videos/{videoId}/like` | 取消点赞 | Bearer JWT | 支持 |
+| PUT | `/api/videos/{videoId}/favorite` | 收藏视频 | Bearer JWT | 支持 |
+| DELETE | `/api/videos/{videoId}/favorite` | 取消收藏 | Bearer JWT | 支持 |
+| POST | `/api/videos/{videoId}/comments` | 发表评论 | Bearer JWT | 支持 |
+| GET | `/api/videos/{videoId}/comments` | 获取评论列表 | 可匿名 | - |
+| DELETE | `/api/comments/{commentId}` | 删除评论 | Bearer JWT | 支持 |
 
-### 3.1 点赞 Toggle
+### 3.1 点赞
 
-#### POST `/api/interactions/likes/toggle`
+#### PUT `/api/videos/{videoId}/like`
 
 请求头：
 
@@ -43,13 +45,7 @@ apps/api/internal/interfaces/http/interaction/
 | `Authorization` | 是 | `Bearer <access_token>` |
 | `Idempotency-Key` | 否 | 客户端幂等键，最长 128 |
 
-请求体：
-
-```json
-{
-  "video_id": 1001
-}
-```
+请求体：空
 
 响应：
 
@@ -62,9 +58,7 @@ apps/api/internal/interfaces/http/interaction/
 }
 ```
 
-### 3.2 收藏 Toggle
-
-#### POST `/api/interactions/favorites/toggle`
+#### DELETE `/api/videos/{videoId}/like`
 
 请求头：
 
@@ -73,13 +67,31 @@ apps/api/internal/interfaces/http/interaction/
 | `Authorization` | 是 | `Bearer <access_token>` |
 | `Idempotency-Key` | 否 | 客户端幂等键，最长 128 |
 
-请求体：
+请求体：空
+
+响应：
 
 ```json
 {
-  "video_id": 1001
+  "video_id": 1001,
+  "action_type": "LIKE",
+  "active": false,
+  "like_count": 17
 }
 ```
+
+### 3.2 收藏
+
+#### PUT `/api/videos/{videoId}/favorite`
+
+请求头：
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `Authorization` | 是 | `Bearer <access_token>` |
+| `Idempotency-Key` | 否 | 客户端幂等键，最长 128 |
+
+请求体：空
 
 响应：
 
@@ -92,9 +104,31 @@ apps/api/internal/interfaces/http/interaction/
 }
 ```
 
+#### DELETE `/api/videos/{videoId}/favorite`
+
+请求头：
+
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `Authorization` | 是 | `Bearer <access_token>` |
+| `Idempotency-Key` | 否 | 客户端幂等键，最长 128 |
+
+请求体：空
+
+响应：
+
+```json
+{
+  "video_id": 1001,
+  "action_type": "FAVORITE",
+  "active": false,
+  "favorite_count": 6
+}
+```
+
 ### 3.3 发表评论
 
-#### POST `/api/interactions/comments`
+#### POST `/api/videos/{videoId}/comments`
 
 请求头：
 
@@ -107,7 +141,6 @@ apps/api/internal/interfaces/http/interaction/
 
 ```json
 {
-  "video_id": 1001,
   "content": "这个剪辑节奏很好"
 }
 ```
@@ -129,13 +162,12 @@ apps/api/internal/interfaces/http/interaction/
 
 ### 3.4 评论列表
 
-#### GET `/api/interactions/comments`
+#### GET `/api/videos/{videoId}/comments`
 
 请求参数：
 
 | 参数 | 位置 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- | --- |
-| `video_id` | query | int64 | 是 | - | 视频ID |
 | `cursor` | query | string | 否 | - | 上一页返回的游标 |
 | `limit` | query | int | 否 | 20 | 返回数量，最大 100 |
 
@@ -175,7 +207,7 @@ apps/api/internal/interfaces/http/interaction/
 
 ### 3.5 删除评论
 
-#### DELETE `/api/interactions/comments/{commentId}`
+#### DELETE `/api/comments/{commentId}`
 
 请求头：
 
@@ -275,16 +307,16 @@ apps/api/internal/interfaces/http/interaction/
 
 ## 6. 核心业务规则
 
-### 6.1 点赞和收藏 Toggle
+### 6.1 点赞和收藏状态变更
 
 处理流程：
 
 1. 校验登录用户和 `video_id`。
 2. 查询视频，视频状态为 `Published` 时允许互动。
 3. 按 `user_id + video_id + action_type` 查询行为记录。
-4. 记录存在且 `status = 1` 时更新为 `status = 2`，对应计数字段减 1。
-5. 记录存在且 `status = 2` 时更新为 `status = 1`，对应计数字段加 1。
-6. 记录缺失时创建 `status = 1` 记录，对应计数字段加 1。
+4. `PUT` 请求将行为记录更新为 `status = 1`，首次生效时对应计数字段加 1。
+5. `DELETE` 请求将行为记录更新为 `status = 2`，首次取消时对应计数字段减 1。
+6. 记录缺失且收到 `DELETE` 请求时创建 `status = 2` 记录，计数保持稳定。
 7. 在同一事务内提交行为记录和 `video_stat` 计数更新。
 
 计数字段映射：
@@ -336,7 +368,7 @@ MVP 实现建议：
 
 | 场景 | 处理方式 |
 | --- | --- |
-| 点赞/收藏 toggle | 依赖 `uk_user_video_type` 控制唯一行为记录，重复请求返回当前状态 |
+| 点赞/收藏状态变更 | 依赖 `uk_user_video_type` 控制唯一行为记录，重复请求返回当前状态 |
 | 评论创建 | 使用 `uk_user_idempotency(user_id, idempotency_key)` 返回已创建评论 |
 | 评论删除 | 删除操作本身幂等，重复删除返回当前删除结果 |
 
@@ -355,9 +387,9 @@ MVP 实现建议：
 | 用例 | 预期 |
 | --- | --- |
 | 登录用户首次点赞公开视频 | 返回 `active=true`，`like_count + 1` |
-| 登录用户再次点赞同一视频 | 返回 `active=false`，`like_count - 1` |
+| 登录用户取消点赞同一视频 | 返回 `active=false`，`like_count - 1` |
 | 登录用户首次收藏公开视频 | 返回 `active=true`，`favorite_count + 1` |
-| 登录用户再次收藏同一视频 | 返回 `active=false`，`favorite_count - 1` |
+| 登录用户取消收藏同一视频 | 返回 `active=false`，`favorite_count - 1` |
 | 登录用户发表评论 | 返回评论详情，`comment_count + 1` |
 | 匿名用户查询评论列表 | 返回状态为正常的评论，按创建时间倒序 |
 | 评论作者删除评论 | 返回 `status=2`，`comment_count - 1` |
@@ -369,7 +401,7 @@ MVP 实现建议：
 
 | 页面 | 接入能力 |
 | --- | --- |
-| Feed 视频右侧操作栏 | 调用点赞和收藏 toggle，使用接口返回计数刷新按钮文案 |
+| Feed 视频右侧操作栏 | 调用点赞和收藏状态接口，使用接口返回计数刷新按钮文案 |
 | Feed 评论抽屉 | 按当前 `video_id` 拉取评论列表 |
 | 评论输入框 | 登录用户提交评论，成功后插入列表顶部 |
 | 未登录用户互动 | 引导到登录页 |

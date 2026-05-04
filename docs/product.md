@@ -63,24 +63,25 @@
 
 | 模块 | 方法 | 接口路径 | 说明 |
 | --- | --- | --- | --- |
-| 账户 | POST | `/api/auth/register` | 注册 |
-| 账户 | POST | `/api/auth/login/password` | 登录并获取 Token |
+| 账户 | POST | `/api/users` | 注册 |
+| 账户 | POST | `/api/sessions` | 登录并获取 Token |
 | 账户 | GET | `/api/users/me` | 获取当前用户信息 |
 | 视频 | POST | `/api/videos` | 发布视频 |
 | 视频 | GET | `/api/videos/{videoId}` | 视频详情 |
-| 视频 | GET | `/api/videos/mine` | 我的作品列表 |
-| Feed | GET | `/api/feed` | 拉取视频流（游标分页） |
-| Feed | POST | `/api/feed/view-events` | 上报曝光/观看事件 |
-| 推荐 | POST | `/internal/reco/candidates` | 召回+排序+打散 |
-| 推荐 | POST | `/internal/reco/exposure/commit` | 写入曝光记录 |
-| 互动 | POST | `/api/interactions/likes/toggle` | 点赞/取消点赞 |
-| 互动 | POST | `/api/interactions/comments` | 发表评论 |
-| 互动 | GET | `/api/interactions/comments` | 评论列表 |
+| 视频 | GET | `/api/users/me/videos` | 我的作品列表 |
+| Feed | GET | `/api/feed-items` | 拉取视频流（游标分页） |
+| Feed | POST | `/api/video-view-events` | 上报曝光/观看事件 |
+| 推荐 | POST | `/internal/recommendation-candidates` | 召回+排序+打散 |
+| 推荐 | POST | `/internal/exposures` | 写入曝光记录 |
+| 互动 | PUT | `/api/videos/{videoId}/like` | 点赞 |
+| 互动 | DELETE | `/api/videos/{videoId}/like` | 取消点赞 |
+| 互动 | POST | `/api/videos/{videoId}/comments` | 发表评论 |
+| 互动 | GET | `/api/videos/{videoId}/comments` | 评论列表 |
 | 审核 | POST | `/internal/review/tasks` | 创建审核任务 |
-| 审核 | POST | `/api/review/tasks/{taskId}/decision` | 人工审核通过/驳回 |
-| 审核 | POST | `/api/review/videos/{videoId}/offline` | 违规下架 |
-| 系统治理 | POST | `/internal/governance/rate-limit/check` | 限流放行检查 |
-| 监控告警 | POST | `/internal/metrics/ingest` | 核心指标写入 |
+| 审核 | PUT | `/api/review/tasks/{taskId}/decision` | 人工审核通过/驳回 |
+| 审核 | PATCH | `/api/videos/{videoId}` | 违规下架 |
+| 系统治理 | POST | `/internal/rate-limit-decisions` | 限流放行检查 |
+| 监控告警 | POST | `/internal/metric-points` | 核心指标写入 |
 
 ### P1（上线后补齐）
 
@@ -89,31 +90,32 @@
 | 模块 | 方法 | 接口路径 | 说明 |
 | --- | --- | --- | --- |
 | 账户 | PATCH | `/api/users/me` | 更新头像、昵称、简介 |
-| 关系 | POST | `/api/relations/follows` | 关注 |
-| 关系 | DELETE | `/api/relations/follows/{targetUserId}` | 取关 |
-| 关系 | GET | `/api/relations/following` | 关注列表 |
-| 关系 | GET | `/api/relations/followers` | 粉丝列表 |
+| 关系 | PUT | `/api/users/me/following/{targetUserId}` | 关注 |
+| 关系 | DELETE | `/api/users/me/following/{targetUserId}` | 取关 |
+| 关系 | GET | `/api/users/me/following` | 关注列表 |
+| 关系 | GET | `/api/users/me/followers` | 粉丝列表 |
 | 视频 | DELETE | `/api/videos/{videoId}` | 删除视频（软删除） |
-| Feed | GET | `/api/feed/refresh` | 下拉刷新 |
-| 推荐 | POST | `/internal/reco/exposure/check` | 曝光去重校验 |
-| 互动 | POST | `/api/interactions/favorites/toggle` | 收藏/取消收藏 |
-| 互动 | DELETE | `/api/interactions/comments/{commentId}` | 删除评论 |
+| Feed | GET | `/api/feed-items` | 下拉刷新 |
+| 推荐 | POST | `/internal/exposure-decisions` | 曝光去重校验 |
+| 互动 | PUT | `/api/videos/{videoId}/favorite` | 收藏 |
+| 互动 | DELETE | `/api/videos/{videoId}/favorite` | 取消收藏 |
+| 互动 | DELETE | `/api/comments/{commentId}` | 删除评论 |
 | 消息 | GET | `/api/messages` | 消息列表 |
-| 消息 | GET | `/api/messages/unread-count` | 未读计数 |
-| 消息 | PATCH | `/api/messages/read` | 批量已读 |
-| 消息 | POST | `/internal/messages/consume-event` | 消费事件生成消息 |
-| 审核 | POST | `/internal/review/tasks/{taskId}/agent-result` | Agent 初审回传 |
+| 消息 | GET | `/api/message-stats/unread` | 未读计数 |
+| 消息 | PATCH | `/api/messages` | 批量已读 |
+| 消息 | POST | `/internal/messages` | 消费事件生成消息 |
+| 审核 | PUT | `/internal/review/tasks/{taskId}/agent-result` | Agent 初审回传 |
 | 后台运营 | GET | `/api/admin/videos` | 运营查视频 |
 | 后台运营 | GET | `/api/admin/review/tasks` | 运营查审核任务 |
-| 后台运营 | POST | `/api/admin/review/tasks/{taskId}/assign` | 分配审核员 |
+| 后台运营 | PUT | `/api/admin/review/tasks/{taskId}/assignee` | 分配审核员 |
 | 后台运营 | PATCH | `/api/admin/configs/{configKey}` | 更新运营配置 |
-| 播放优化 | GET | `/api/playback/config` | 播放参数下发 |
-| 播放优化 | POST | `/api/playback/preload` | 预加载建议 |
-| 播放优化 | POST | `/internal/playback/qos/report` | 播放质量上报 |
+| 播放优化 | GET | `/api/playback-config` | 播放参数下发 |
+| 播放优化 | GET | `/api/preload-videos` | 预加载建议 |
+| 播放优化 | POST | `/internal/playback-qos-reports` | 播放质量上报 |
 | 系统治理 | GET | `/internal/governance/degrade-switches` | 查询降级开关 |
 | 系统治理 | PATCH | `/api/admin/governance/degrade-switches/{key}` | 调整降级开关 |
-| 系统治理 | POST | `/internal/governance/dead-letter/retry` | 死信任务重试 |
-| 监控告警 | GET | `/api/admin/metrics/dashboard` | 监控看板查询 |
+| 系统治理 | POST | `/internal/dead-letter-retries` | 死信任务重试 |
+| 监控告警 | GET | `/api/admin/metric-dashboard` | 监控看板查询 |
 | 监控告警 | POST | `/api/admin/alerts/rules` | 告警规则创建 |
 | 监控告警 | GET | `/api/admin/alerts/events` | 告警事件查询 |
 

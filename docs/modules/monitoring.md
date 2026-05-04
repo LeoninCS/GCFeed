@@ -7,8 +7,8 @@
 
 | 方法 | 接口路径 | 作用 | 鉴权 | 幂等键 |
 | --- | --- | --- | --- | --- |
-| POST | `/internal/metrics/ingest` | 写入业务指标点 | 服务鉴权 | 支持 |
-| GET | `/api/admin/metrics/dashboard` | 查询核心看板数据 | Bearer JWT(运营角色) | - |
+| POST | `/internal/metric-points` | 写入业务指标点 | 服务鉴权 | 支持 |
+| GET | `/api/admin/metric-dashboard` | 查询核心看板数据 | Bearer JWT(运营角色) | - |
 | POST | `/api/admin/alerts/rules` | 新建告警规则 | Bearer JWT(管理员) | 支持 |
 | GET | `/api/admin/alerts/events` | 查询告警事件 | Bearer JWT(运营角色) | - |
 

@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | GET | `/api/admin/videos` | 按条件查询视频 | Bearer JWT(运营角色) | - |
 | GET | `/api/admin/review/tasks` | 查询待处理审核任务 | Bearer JWT(运营角色) | - |
-| POST | `/api/admin/review/tasks/{taskId}/assign` | 分配审核员 | Bearer JWT(运营角色) | 支持 |
+| PUT | `/api/admin/review/tasks/{taskId}/assignee` | 分配审核员 | Bearer JWT(运营角色) | 支持 |
 | PATCH | `/api/admin/configs/{configKey}` | 更新配置项 | Bearer JWT(管理员) | 支持 |
 
 ## 3. 数据表设计（最小实现）
