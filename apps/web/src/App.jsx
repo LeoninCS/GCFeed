@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const TOKEN_KEY = "gcfeed.accessToken";
 const USER_KEY = "gcfeed.user";
+const PUBLIC_PROFILE_KEY = "gcfeed.publicProfiles";
 const FEED_TRANSITION_MS = 320;
 
 const image = {
@@ -90,6 +91,20 @@ function App() {
     );
   }
 
+  const publicUserID = publicUserIDFromRoute(route);
+  if (publicUserID > 0) {
+    return (
+      <AppShell
+        user={user}
+        authenticated={Boolean(token && user)}
+        onNavigate={(path) => navigate(path, setRoute)}
+        onLogout={() => logout(session, setRoute)}
+      >
+        <PublicProfilePage userID={publicUserID} onNavigate={(path) => navigate(path, setRoute)} />
+      </AppShell>
+    );
+  }
+
   if (route === "/upload") {
     return (
       <AppShell
@@ -163,7 +178,7 @@ function LoginPage({ session, onNavigate }) {
             <span className="material-symbols-outlined">play_arrow</span>
             <div>
               <strong>GCFeed</strong>
-              <span>16:9 desktop feed</span>
+              <span>16:9 桌面 Feed</span>
             </div>
           </div>
         </div>
@@ -192,7 +207,7 @@ function LoginPage({ session, onNavigate }) {
               <input
                 value={form.account}
                 onChange={(event) => setForm({ ...form, account: event.target.value })}
-                placeholder="account@example.com"
+                placeholder="请输入账号"
                 autoComplete="username"
               />
             </label>
@@ -258,21 +273,21 @@ function TopNav({ user, authenticated, onNavigate, onLogout }) {
       <div className="top-center">
         <label className="search-box">
           <span className="material-symbols-outlined">search</span>
-          <input placeholder="Search" />
+          <input placeholder="搜索" />
         </label>
       </div>
       <div className="top-actions">
         <button className="upload-button" onClick={() => onNavigate(authenticated ? "/upload" : "/auth")}>
           <span className="material-symbols-outlined">upload</span>
-          Upload
+          发布
         </button>
-        <button className="icon-button" aria-label="Notifications">
+        <button className="icon-button" aria-label="通知">
           <span className="material-symbols-outlined">notifications</span>
         </button>
         <button
           className={`avatar-button ${authenticated ? "" : "guest"}`}
           onClick={() => onNavigate(authenticated ? "/profile" : "/auth")}
-          aria-label={authenticated ? "Profile" : "Login"}
+          aria-label={authenticated ? "个人资料" : "登录"}
         >
           {authenticated ? (
             <img src={user.avatar_url || image.currentUser} alt="" />
@@ -284,7 +299,7 @@ function TopNav({ user, authenticated, onNavigate, onLogout }) {
           )}
         </button>
         {authenticated && (
-          <button className="icon-button" onClick={onLogout} aria-label="Logout">
+          <button className="icon-button" onClick={onLogout} aria-label="退出登录">
             <span className="material-symbols-outlined">logout</span>
           </button>
         )}
@@ -298,6 +313,9 @@ function FeedPage({ session, onNavigate }) {
   const [index, setIndex] = useState(0);
   const [liked, setLiked] = useState({});
   const [favorited, setFavorited] = useState({});
+  const [following, setFollowing] = useState({});
+  const [followBusyID, setFollowBusyID] = useState(0);
+  const [followError, setFollowError] = useState("");
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [comments, setComments] = useState([]);
   const [commentsState, setCommentsState] = useState("idle");
@@ -334,6 +352,30 @@ function FeedPage({ session, onNavigate }) {
       live = false;
     };
   }, [session.token]);
+
+  useEffect(() => {
+    if (!session.token) {
+      setFollowing({});
+      return undefined;
+    }
+
+    let live = true;
+    loadFollowingMap(session.token)
+      .then((map) => {
+        if (live) {
+          setFollowing(map);
+        }
+      })
+      .catch((error) => {
+        if (error.status === 401) {
+          session.clearAuth();
+          onNavigate("/auth");
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [onNavigate, session]);
 
   useEffect(() => {
     return loadFeed();
@@ -413,6 +455,36 @@ function FeedPage({ session, onNavigate }) {
       }
     }
   }, [current, favorited, onNavigate, requireLogin, session, swipe, updateCurrentItem]);
+
+  const setFollow = useCallback(async () => {
+    if (!current || swipe || !requireLogin()) return;
+    if (current.author_id === session.user?.id) return;
+
+    const authorID = current.author_id;
+    const nextFollowing = !Boolean(following[authorID]);
+    setFollowBusyID(authorID);
+    setFollowError("");
+    try {
+      const data = await apiRequest(`/api/users/me/following/${authorID}`, {
+        method: nextFollowing ? "PUT" : "DELETE",
+        token: session.token,
+        headers: {
+          "Idempotency-Key": `web-follow-${authorID}-${Date.now()}`
+        }
+      });
+      setFollowing((state) => ({ ...state, [authorID]: Boolean(data.following) }));
+      updateSessionRelationCount(session, data.following_count);
+    } catch (error) {
+      if (error.status === 401) {
+        session.clearAuth();
+        onNavigate("/auth");
+        return;
+      }
+      setFollowError(error.message || "关注操作失败");
+    } finally {
+      setFollowBusyID(0);
+    }
+  }, [current, following, onNavigate, requireLogin, session, swipe]);
 
   const loadComments = useCallback(() => {
     if (!current) return undefined;
@@ -608,13 +680,19 @@ function FeedPage({ session, onNavigate }) {
       if (event.key === "f" || event.key === "F") {
         setFavorite();
       }
+      if (event.key === "r" || event.key === "R") {
+        setFollow();
+      }
       if (event.key === "c" || event.key === "C") {
         setCommentsOpen(true);
+      }
+      if (event.key === "Escape") {
+        setCommentsOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [index, items.length, setFavorite, setLike, swipe]);
+  }, [index, items.length, setFavorite, setFollow, setLike, swipe]);
 
   function goNext() {
     moveTo(Math.min(items.length - 1, index + 1));
@@ -664,9 +742,15 @@ function FeedPage({ session, onNavigate }) {
                     item={visibleNext}
                     liked={Boolean(liked[visibleNext.video_id])}
                     favorited={Boolean(favorited[visibleNext.video_id])}
+                    following={Boolean(following[visibleNext.author_id])}
+                    followBusy={followBusyID === visibleNext.author_id}
+                    ownVideo={visibleNext.author_id === session.user?.id}
                     onLike={setLike}
                     onComment={() => setCommentsOpen(true)}
                     onFavorite={setFavorite}
+                    onFollow={setFollow}
+                    onOpenAuthor={(author) => openPublicProfile(author, onNavigate)}
+                    followError={followError}
                   />
                 </div>
               )}
@@ -675,9 +759,15 @@ function FeedPage({ session, onNavigate }) {
                   item={visibleCurrent}
                   liked={Boolean(liked[visibleCurrent.video_id])}
                   favorited={Boolean(favorited[visibleCurrent.video_id])}
+                  following={Boolean(following[visibleCurrent.author_id])}
+                  followBusy={followBusyID === visibleCurrent.author_id}
+                  ownVideo={visibleCurrent.author_id === session.user?.id}
                   onLike={setLike}
                   onComment={() => setCommentsOpen(true)}
                   onFavorite={setFavorite}
+                  onFollow={setFollow}
+                  onOpenAuthor={(author) => openPublicProfile(author, onNavigate)}
+                  followError={followError}
                 />
               </div>
               {swipe?.direction === "next" && visibleNext && (
@@ -686,9 +776,15 @@ function FeedPage({ session, onNavigate }) {
                     item={visibleNext}
                     liked={Boolean(liked[visibleNext.video_id])}
                     favorited={Boolean(favorited[visibleNext.video_id])}
+                    following={Boolean(following[visibleNext.author_id])}
+                    followBusy={followBusyID === visibleNext.author_id}
+                    ownVideo={visibleNext.author_id === session.user?.id}
                     onLike={setLike}
                     onComment={() => setCommentsOpen(true)}
                     onFavorite={setFavorite}
+                    onFollow={setFollow}
+                    onOpenAuthor={(author) => openPublicProfile(author, onNavigate)}
+                    followError={followError}
                   />
                 </div>
               )}
@@ -709,6 +805,7 @@ function FeedPage({ session, onNavigate }) {
         error={commentsError}
         onRetry={loadComments}
         authenticated={Boolean(session.token && session.user)}
+        onOpenUser={(profile) => openPublicProfile(profile, onNavigate)}
       />
     </main>
   );
@@ -724,7 +821,20 @@ function FeedMessage({ icon, title, action, onAction }) {
   );
 }
 
-function VideoStage({ item, liked, favorited, onLike, onComment, onFavorite }) {
+function VideoStage({
+  item,
+  liked,
+  favorited,
+  following,
+  followBusy,
+  ownVideo,
+  followError,
+  onLike,
+  onComment,
+  onFavorite,
+  onFollow,
+  onOpenAuthor
+}) {
   const cover = item.cover_url || image.stage;
   const media = item.media_url || cover;
   const showVideo = isVideoSource(media);
@@ -740,12 +850,20 @@ function VideoStage({ item, liked, favorited, onLike, onComment, onFavorite }) {
       )}
       <div className="stage-copy">
         <div className="creator-row">
-          <img src={item.avatar_url || image.creator} alt="" />
-          <div>
+          <button className="creator-profile-button" type="button" onClick={() => onOpenAuthor(profileFromFeedItem(item))}>
+            <img src={item.avatar_url || image.creator} alt="" />
             <strong>@{item.author}</strong>
-          </div>
-          <button>Follow</button>
+          </button>
+          <button
+            className={`follow-button ${following ? "active" : ""}`}
+            type="button"
+            onClick={onFollow}
+            disabled={followBusy || ownVideo}
+          >
+            {ownVideo ? "本人" : followBusy ? "处理中" : following ? "已关注" : "关注"}
+          </button>
         </div>
+        {followError && <p className="stage-notice">{followError}</p>}
         <h1>{item.title}</h1>
         <p>{item.description}</p>
       </div>
@@ -771,18 +889,32 @@ function ActionButton({ icon, label, active, compact, onClick }) {
   );
 }
 
-function CommentPanel({ open, value, onChange, onSubmit, onClose, user, count, comments, state, error, onRetry, authenticated }) {
+function CommentPanel({
+  open,
+  value,
+  onChange,
+  onSubmit,
+  onClose,
+  user,
+  count,
+  comments,
+  state,
+  error,
+  onRetry,
+  authenticated,
+  onOpenUser
+}) {
   return (
     <aside className={`comment-panel ${open ? "open" : ""}`}>
       <header className="comment-header">
         <h2>
-          Comments <span>{formatMetric(count)}</span>
+          评论 <span>{formatMetric(count)}</span>
         </h2>
         <div>
-          <button className="icon-button small" aria-label="Filter comments">
+          <button className="icon-button small" aria-label="筛选评论">
             <span className="material-symbols-outlined">tune</span>
           </button>
-          <button className="icon-button small" aria-label="Close comments" onClick={onClose}>
+          <button className="icon-button small" type="button" aria-label="关闭评论" onClick={onClose}>
             <span className="material-symbols-outlined">close</span>
           </button>
         </div>
@@ -793,10 +925,14 @@ function CommentPanel({ open, value, onChange, onSubmit, onClose, user, count, c
         {state === "ready" && comments.length === 0 && <CommentMessage icon="chat_bubble" title="暂无评论" />}
         {comments.map((comment) => (
           <article className="comment-item" key={comment.id}>
-            <img src={comment.user_avatar_url || image.currentUser} alt="" />
+            <button className="comment-user-button" type="button" onClick={() => onOpenUser(profileFromComment(comment))}>
+              <img src={comment.user_avatar_url || image.currentUser} alt="" />
+            </button>
             <div>
               <div className="comment-meta">
-                <strong>{comment.user_nickname || `user_${comment.user_id}`}</strong>
+                <button type="button" onClick={() => onOpenUser(profileFromComment(comment))}>
+                  {comment.user_nickname || `用户_${comment.user_id}`}
+                </button>
                 <span>{formatRelativeTime(comment.created_at)}</span>
               </div>
               <p>{comment.content}</p>
@@ -815,10 +951,10 @@ function CommentPanel({ open, value, onChange, onSubmit, onClose, user, count, c
         <input
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          placeholder={authenticated ? "Add a comment..." : "登录后评论"}
+          placeholder={authenticated ? "添加评论..." : "登录后评论"}
           disabled={!authenticated}
         />
-        <button aria-label="Send comment" disabled={!authenticated || !value.trim()}>
+        <button aria-label="发送评论" disabled={!authenticated || !value.trim()}>
           <span className="material-symbols-outlined">send</span>
         </button>
       </form>
@@ -850,6 +986,15 @@ function ProfilePage({ session, onNavigate }) {
   const [status, setStatus] = useState("");
   const [videos, setVideos] = useState([]);
   const [videosState, setVideosState] = useState("loading");
+  const [relationTab, setRelationTab] = useState("following");
+  const [relationModalOpen, setRelationModalOpen] = useState(false);
+  const [relationItems, setRelationItems] = useState([]);
+  const [relationCursor, setRelationCursor] = useState("");
+  const [relationHasMore, setRelationHasMore] = useState(false);
+  const [relationState, setRelationState] = useState("idle");
+  const [relationError, setRelationError] = useState("");
+  const [relationFollowing, setRelationFollowing] = useState({});
+  const [relationBusyID, setRelationBusyID] = useState(0);
   const followingCount = baseUser.following_count ?? baseUser.followingCount ?? 0;
   const followerCount = baseUser.follower_count ?? baseUser.followerCount ?? 0;
 
@@ -895,6 +1040,120 @@ function ProfilePage({ session, onNavigate }) {
       });
   }, [onNavigate, session]);
 
+  useEffect(() => {
+    if (!session.token) {
+      setRelationItems([]);
+      setRelationCursor("");
+      setRelationHasMore(false);
+      setRelationFollowing({});
+      setRelationState("ready");
+      return undefined;
+    }
+
+    let live = true;
+    loadFollowingMap(session.token)
+      .then((map) => {
+        if (live) {
+          setRelationFollowing(map);
+        }
+      })
+      .catch((error) => {
+        if (error.status === 401) {
+          session.clearAuth();
+          onNavigate("/auth");
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [onNavigate, session]);
+
+  const loadRelationPage = useCallback(
+    async ({ reset = false, cursor = "" } = {}) => {
+      if (!session.token) return;
+      const requestCursor = reset ? "" : cursor;
+      setRelationState(reset ? "loading" : "loadingMore");
+      setRelationError("");
+      try {
+        const path = relationListPath(relationTab, requestCursor);
+        const data = await apiRequest(path, { token: session.token });
+        const items = data.items || [];
+        setRelationItems((state) => (reset ? items : [...state, ...items]));
+        setRelationCursor(data.next_cursor || "");
+        setRelationHasMore(Boolean(data.has_more));
+        if (relationTab === "following") {
+          setRelationFollowing((state) => {
+            const next = { ...state };
+            for (const item of items) {
+              next[item.user_id] = true;
+            }
+            return next;
+          });
+        }
+        setRelationState("ready");
+      } catch (error) {
+        if (error.status === 401) {
+          session.clearAuth();
+          onNavigate("/auth");
+          return;
+        }
+        setRelationError(error.message || "关系列表加载失败");
+        setRelationState("error");
+      }
+    },
+    [onNavigate, relationTab, session]
+  );
+
+  useEffect(() => {
+    setRelationItems([]);
+    setRelationCursor("");
+    setRelationHasMore(false);
+    if (!session.token || !relationModalOpen) return;
+    loadRelationPage({ reset: true });
+  }, [loadRelationPage, relationModalOpen, relationTab, session.token]);
+
+  function openRelationModal(tab) {
+    setRelationTab(tab);
+    setRelationModalOpen(true);
+  }
+
+  async function toggleRelationFollow(targetUserID) {
+    if (!session.token) {
+      onNavigate("/auth");
+      return;
+    }
+    if (!targetUserID || targetUserID === baseUser.id) return;
+
+    const currentFollowing = Boolean(relationFollowing[targetUserID]);
+    setRelationBusyID(targetUserID);
+    setRelationError("");
+    try {
+      const data = await apiRequest(`/api/users/me/following/${targetUserID}`, {
+        method: currentFollowing ? "DELETE" : "PUT",
+        token: session.token,
+        headers: {
+          "Idempotency-Key": `web-profile-follow-${targetUserID}-${Date.now()}`
+        }
+      });
+      setRelationFollowing((state) => ({ ...state, [targetUserID]: Boolean(data.following) }));
+      if (relationTab === "following" && !data.following) {
+        setRelationItems((state) => state.filter((item) => item.user_id !== targetUserID));
+      }
+      updateSessionRelationCount(session, data.following_count);
+      setRelationState("ready");
+    } catch (error) {
+      if (error.status === 401) {
+        session.clearAuth();
+        onNavigate("/auth");
+        return;
+      }
+      setRelationError(error.message || "关注操作失败");
+      setRelationState("error");
+    } finally {
+      setRelationBusyID(0);
+    }
+  }
+
   async function handleSave(event) {
     event.preventDefault();
     setStatus("保存中");
@@ -931,23 +1190,31 @@ function ProfilePage({ session, onNavigate }) {
         <div className="profile-summary">
           <img className="profile-avatar" src={avatarPreview || form.avatar_url || image.currentUser} alt="" />
           <div>
-            <p className="eyebrow">Creator Profile</p>
+            <p className="eyebrow">创作者资料</p>
             <h1>{form.nickname || baseUser.account}</h1>
             <p>{form.bio || "作品、关注和互动资料会显示在这里。"}</p>
           </div>
-          <div className="profile-stats" aria-label="Profile stats">
-            <span>
+          <div className="profile-stats" aria-label="资料统计">
+            <button
+              className={relationModalOpen && relationTab === "following" ? "active" : ""}
+              type="button"
+              onClick={() => openRelationModal("following")}
+            >
               <strong>{formatMetric(followingCount)}</strong>
-              Following
-            </span>
-            <span>
+              关注
+            </button>
+            <button
+              className={relationModalOpen && relationTab === "followers" ? "active" : ""}
+              type="button"
+              onClick={() => openRelationModal("followers")}
+            >
               <strong>{formatMetric(followerCount)}</strong>
-              Followers
-            </span>
-            <span>
+              粉丝
+            </button>
+            <button type="button">
               <strong>{formatMetric(videos.length)}</strong>
-              Works
-            </span>
+              作品
+            </button>
           </div>
           <button className="profile-edit-button" onClick={() => setEditing(true)} aria-label="编辑资料">
             <span className="material-symbols-outlined">manage_accounts</span>
@@ -964,28 +1231,26 @@ function ProfilePage({ session, onNavigate }) {
               Feed
             </button>
           </header>
-          <div className="work-list">
-            {videosState === "loading" && <p className="card-empty">正在加载作品</p>}
-            {videosState !== "loading" && typeof videosState === "string" && videosState !== "ready" && (
-              <p className="card-empty">{videosState}</p>
-            )}
-            {videosState === "ready" && videos.length === 0 && <p className="card-empty">暂无作品</p>}
-            {videos.map((video) => (
-              <button className="work-item" key={video.id || video.video_id} onClick={() => setSelectedWork(video)}>
-                <div className="work-thumb">
-                  <img src={video.cover_url || image.stage} alt="" />
-                  <span className="material-symbols-outlined">play_arrow</span>
-                </div>
-                <div className="work-meta">
-                  <h3>{video.title}</h3>
-                  <p>{formatMetric(video.like_count || 0)} likes · {formatMetric(video.comment_count || 0)} comments</p>
-                  <span className="status-badge">{video.status === 0 ? "Reviewing" : "Published"}</span>
-                </div>
-              </button>
-            ))}
-          </div>
+          <VideoGrid videos={videos} state={videosState} onSelect={setSelectedWork} />
         </section>
       </section>
+      {relationModalOpen && (
+        <RelationModal
+          tab={relationTab}
+          items={relationItems}
+          state={relationState}
+          error={relationError}
+          hasMore={relationHasMore}
+          following={relationFollowing}
+          busyID={relationBusyID}
+          currentUserID={baseUser.id}
+          onTabChange={setRelationTab}
+          onClose={() => setRelationModalOpen(false)}
+          onRetry={() => loadRelationPage({ reset: true })}
+          onLoadMore={() => loadRelationPage({ reset: false, cursor: relationCursor })}
+          onToggleFollow={toggleRelationFollow}
+        />
+      )}
       {selectedWork && <WorkViewer video={selectedWork} onClose={() => setSelectedWork(null)} />}
       {editing && (
         <div className="modal-backdrop" role="presentation">
@@ -1033,6 +1298,258 @@ function ProfilePage({ session, onNavigate }) {
   );
 }
 
+function PublicProfilePage({ userID, onNavigate }) {
+  const [profile, setProfile] = useState(() => readPublicProfile(userID));
+  const [profileState, setProfileState] = useState("idle");
+  const [videos, setVideos] = useState([]);
+  const [videosState, setVideosState] = useState("loading");
+  const [selectedWork, setSelectedWork] = useState(null);
+
+  useEffect(() => {
+    setProfile(readPublicProfile(userID));
+  }, [userID]);
+
+  useEffect(() => {
+    let live = true;
+    setProfileState("loading");
+    apiRequest(`/api/users/${userID}`)
+      .then((data) => {
+        if (!live) return;
+        const nextProfile = normalizePublicProfile(data);
+        setProfile(nextProfile);
+        if (nextProfile) {
+          savePublicProfile(nextProfile);
+        }
+        setProfileState("ready");
+      })
+      .catch((error) => {
+        if (!live) return;
+        setProfileState(error.message || "资料加载失败");
+      });
+    return () => {
+      live = false;
+    };
+  }, [userID]);
+
+  useEffect(() => {
+    let live = true;
+    setVideosState("loading");
+    apiRequest(`/api/users/${userID}/videos?limit=24`)
+      .then((data) => {
+        if (!live) return;
+        setVideos(data.items || []);
+        setVideosState("ready");
+      })
+      .catch((error) => {
+        if (!live) return;
+        setVideos([]);
+        setVideosState(error.message || "作品加载失败");
+      });
+    return () => {
+      live = false;
+    };
+  }, [userID]);
+
+  const displayProfile = profile || {
+    id: userID,
+    nickname: `用户_${userID}`,
+    avatar_url: image.currentUser,
+    bio: "这个用户的资料会显示在这里。"
+  };
+
+  return (
+    <main className="profile-page">
+      <section className="profile-hero">
+        <div className="profile-summary public-profile-summary">
+          <img className="profile-avatar" src={displayProfile.avatar_url || image.currentUser} alt="" />
+          <div>
+            <p className="eyebrow">用户主页</p>
+            <h1>{displayProfile.nickname || `用户_${userID}`}</h1>
+            <p>{displayProfile.bio || "这个用户还没有填写简介。"}</p>
+            {profileState !== "idle" && profileState !== "loading" && profileState !== "ready" && (
+              <p className="form-message">{profileState}</p>
+            )}
+          </div>
+          <div className="profile-stats public-profile-stats" aria-label="资料统计">
+            <button type="button">
+              <strong>{formatOptionalMetric(displayProfile.following_count)}</strong>
+              关注
+            </button>
+            <button type="button">
+              <strong>{formatOptionalMetric(displayProfile.follower_count)}</strong>
+              粉丝
+            </button>
+            <button type="button">
+              <strong>{formatOptionalMetric(displayProfile.work_count)}</strong>
+              作品
+            </button>
+          </div>
+          <button className="ghost-button compact public-back-button" type="button" onClick={() => onNavigate("/feed")}>
+            <span className="material-symbols-outlined">home</span>
+            Feed
+          </button>
+        </div>
+      </section>
+
+      <section className="profile-grid">
+        <section className="profile-card works-card">
+          <header>
+            <h2>他的作品</h2>
+          </header>
+          <VideoGrid videos={videos} state={videosState} onSelect={setSelectedWork} />
+        </section>
+      </section>
+      {selectedWork && <WorkViewer video={selectedWork} onClose={() => setSelectedWork(null)} />}
+    </main>
+  );
+}
+
+function VideoGrid({ videos, state, onSelect }) {
+  return (
+    <div className="work-list">
+      {state === "loading" && <p className="card-empty">正在加载作品</p>}
+      {state !== "loading" && typeof state === "string" && state !== "ready" && <p className="card-empty">{state}</p>}
+      {state === "ready" && videos.length === 0 && <p className="card-empty">暂无作品</p>}
+      {videos.map((video) => (
+        <button className="work-item" key={video.id || video.video_id} onClick={() => onSelect(video)}>
+          <div className="work-thumb">
+            <img src={video.cover_url || image.stage} alt="" />
+            <span className="material-symbols-outlined">play_arrow</span>
+          </div>
+          <div className="work-meta">
+            <h3>{video.title}</h3>
+            <p>{formatMetric(video.like_count || 0)} 点赞 · {formatMetric(video.comment_count || 0)} 评论</p>
+            <span className="status-badge">{video.status === 0 ? "审核中" : "已发布"}</span>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RelationList({
+  tab,
+  items,
+  state,
+  error,
+  hasMore,
+  following,
+  busyID,
+  currentUserID,
+  onRetry,
+  onLoadMore,
+  onToggleFollow
+}) {
+  const loading = state === "loading";
+  const loadingMore = state === "loadingMore";
+
+  if (loading) {
+    return <p className="card-empty">正在加载关系</p>;
+  }
+
+  if (state === "error" && items.length === 0) {
+    return (
+      <div className="card-empty">
+        <span>{error || "关系列表加载失败"}</span>
+        <button className="ghost-button compact" type="button" onClick={onRetry}>
+          重试
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relation-list-wrap">
+      {items.length === 0 && <p className="card-empty">{tab === "following" ? "暂无关注" : "暂无粉丝"}</p>}
+      <div className="relation-list">
+        {items.map((item) => {
+          const isSelf = item.user_id === currentUserID;
+          const isFollowing = Boolean(following[item.user_id]);
+          return (
+            <article className="relation-item" key={`${tab}-${item.user_id}`}>
+              <img src={item.avatar_url || image.currentUser} alt="" />
+              <div>
+                <strong>{item.nickname || `用户_${item.user_id}`}</strong>
+                <p>{item.bio || "这个用户还没有填写简介。"}</p>
+                <span>{formatRelativeTime(item.followed_at)}</span>
+              </div>
+              <button
+                className={`relation-follow-button ${isFollowing ? "active" : ""}`}
+                type="button"
+                onClick={() => onToggleFollow(item.user_id)}
+                disabled={busyID === item.user_id || isSelf}
+              >
+                {isSelf ? "本人" : busyID === item.user_id ? "处理中" : isFollowing ? "已关注" : "关注"}
+              </button>
+            </article>
+          );
+        })}
+      </div>
+      {state === "error" && items.length > 0 && <p className="form-message">{error || "加载失败"}</p>}
+      {hasMore && (
+        <button className="ghost-button compact relation-more-button" type="button" onClick={onLoadMore} disabled={loadingMore}>
+          {loadingMore ? "加载中" : "加载更多"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function RelationModal({
+  tab,
+  items,
+  state,
+  error,
+  hasMore,
+  following,
+  busyID,
+  currentUserID,
+  onTabChange,
+  onClose,
+  onRetry,
+  onLoadMore,
+  onToggleFollow
+}) {
+  return (
+    <div className="modal-backdrop relation-modal-backdrop" role="presentation" onClick={onClose}>
+      <section className="relation-modal" onClick={(event) => event.stopPropagation()}>
+        <header>
+          <div>
+            <p className="eyebrow">关系</p>
+            <h2>{tab === "following" ? "关注的人" : "粉丝"}</h2>
+          </div>
+          <div className="relation-modal-actions">
+            <div className="relation-tabs">
+              <button className={tab === "following" ? "active" : ""} type="button" onClick={() => onTabChange("following")}>
+                关注
+              </button>
+              <button className={tab === "followers" ? "active" : ""} type="button" onClick={() => onTabChange("followers")}>
+                粉丝
+              </button>
+            </div>
+            <button className="icon-button small" type="button" onClick={onClose} aria-label="关闭关系弹窗">
+              <span className="material-symbols-outlined">close</span>
+            </button>
+          </div>
+        </header>
+        <RelationList
+          tab={tab}
+          items={items}
+          state={state}
+          error={error}
+          hasMore={hasMore}
+          following={following}
+          busyID={busyID}
+          currentUserID={currentUserID}
+          onRetry={onRetry}
+          onLoadMore={onLoadMore}
+          onToggleFollow={onToggleFollow}
+        />
+      </section>
+    </div>
+  );
+}
+
 function WorkViewer({ video, onClose }) {
   const media = video.media_url || video.cover_url || image.stage;
   const cover = video.cover_url || image.stage;
@@ -1043,7 +1560,7 @@ function WorkViewer({ video, onClose }) {
         <header>
           <div>
             <h2>{video.title || "作品"}</h2>
-            <p>{formatMetric(video.like_count || 0)} likes · {formatMetric(video.comment_count || 0)} comments</p>
+            <p>{formatMetric(video.like_count || 0)} 点赞 · {formatMetric(video.comment_count || 0)} 评论</p>
           </div>
           <button className="icon-button small" type="button" onClick={onClose} aria-label="关闭">
             <span className="material-symbols-outlined">close</span>
@@ -1141,7 +1658,7 @@ function UploadPage({ session, onNavigate }) {
       <section className="upload-card">
         <header>
           <div>
-            <p className="eyebrow">Upload</p>
+            <p className="eyebrow">发布</p>
             <h1>发布视频</h1>
           </div>
           <button className="ghost-button compact" onClick={() => onNavigate("/feed")}>
@@ -1216,6 +1733,7 @@ function UploadPage({ session, onNavigate }) {
 function normalizeRoute(pathname) {
   if (pathname === "/login") return "/auth";
   if (pathname === "/me") return "/profile";
+  if (/^\/users\/\d+$/.test(pathname)) return pathname;
   if (["/", "/auth", "/feed", "/profile", "/upload"].includes(pathname)) return pathname;
   return "/feed";
 }
@@ -1233,8 +1751,8 @@ function logout(session, setRoute) {
       token: session.token
     }).catch(() => {});
   }
-	session.clearAuth();
-	navigate("/feed", setRoute);
+  session.clearAuth();
+  navigate("/feed", setRoute);
 }
 
 function readStoredUser() {
@@ -1244,6 +1762,79 @@ function readStoredUser() {
   } catch {
     return null;
   }
+}
+
+function publicUserIDFromRoute(route) {
+  const match = /^\/users\/(\d+)$/.exec(route);
+  if (!match) return 0;
+  return Number(match[1]);
+}
+
+function openPublicProfile(profile, onNavigate) {
+  const normalized = normalizePublicProfile(profile);
+  if (!normalized?.id) return;
+  savePublicProfile(normalized);
+  onNavigate(`/users/${normalized.id}`);
+}
+
+function normalizePublicProfile(profile) {
+  if (!profile) return null;
+  const id = Number(profile.id || profile.user_id || profile.author_id || 0);
+  if (!id) return null;
+  const followingCount = valueOrUndefined(profile.following_count ?? profile.followingCount);
+  const followerCount = valueOrUndefined(profile.follower_count ?? profile.followerCount);
+  return {
+    id,
+    nickname: profile.nickname || profile.author || profile.user_nickname || `用户_${id}`,
+    avatar_url: profile.avatar_url || profile.user_avatar_url || profile.author_avatar_url || image.currentUser,
+    bio: profile.bio || profile.description || "",
+    work_count: valueOrUndefined(profile.work_count ?? profile.workCount),
+    ...(followingCount === undefined ? {} : { following_count: followingCount }),
+    ...(followerCount === undefined ? {} : { follower_count: followerCount })
+  };
+}
+
+function valueOrUndefined(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function profileFromFeedItem(item) {
+  return {
+    id: item.author_id,
+    nickname: item.author,
+    avatar_url: item.avatar_url,
+    bio: item.author_bio || ""
+  };
+}
+
+function profileFromComment(comment) {
+  return {
+    id: comment.user_id,
+    nickname: comment.user_nickname || `用户_${comment.user_id}`,
+    avatar_url: comment.user_avatar_url || image.currentUser,
+    bio: ""
+  };
+}
+
+function readPublicProfiles() {
+  try {
+    const raw = localStorage.getItem(PUBLIC_PROFILE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function readPublicProfile(userID) {
+  return readPublicProfiles()[String(userID)] || null;
+}
+
+function savePublicProfile(profile) {
+  const profiles = readPublicProfiles();
+  profiles[String(profile.id)] = profile;
+  localStorage.setItem(PUBLIC_PROFILE_KEY, JSON.stringify(profiles));
 }
 
 async function apiRequest(path, options = {}) {
@@ -1307,6 +1898,40 @@ async function uploadFile(file, kind, token) {
   return response.json();
 }
 
+async function loadFollowingMap(token) {
+  const next = {};
+  let cursor = "";
+  for (let page = 0; page < 20; page++) {
+    const data = await apiRequest(relationListPath("following", cursor, 100), { token });
+    for (const item of data.items || []) {
+      next[item.user_id] = true;
+    }
+    if (!data.has_more || !data.next_cursor) {
+      break;
+    }
+    cursor = data.next_cursor;
+  }
+  return next;
+}
+
+function relationListPath(tab, cursor = "", limit = 20) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  const resource = tab === "followers" ? "followers" : "following";
+  return `/api/users/me/${resource}?${params.toString()}`;
+}
+
+function updateSessionRelationCount(session, followingCount) {
+  if (!session.user || !Number.isFinite(Number(followingCount))) return;
+  session.setAuth(session.token, {
+    ...session.user,
+    following_count: Number(followingCount),
+    followingCount: Number(followingCount)
+  });
+}
+
 function mapFeedItem(item) {
   return {
     video_id: item.video_id,
@@ -1317,7 +1942,7 @@ function mapFeedItem(item) {
     like_count: item.like_count,
     comment_count: item.comment_count,
     favorite_count: item.favorite_count,
-    author: item.author_nickname || `creator_${item.author_id}`,
+    author: item.author_nickname || `创作者_${item.author_id}`,
     avatar_url: item.author_avatar_url || image.creator,
     description: item.description || ""
   };
@@ -1329,9 +1954,18 @@ function isVideoSource(url) {
 
 function formatMetric(value) {
   const number = Number(value || 0);
-  if (number >= 1000000) return `${(number / 1000000).toFixed(number >= 10000000 ? 0 : 1)}M`;
-  if (number >= 1000) return `${(number / 1000).toFixed(number >= 10000 ? 0 : 1)}k`;
+  if (number >= 100000000) return `${trimMetric(number / 100000000, number >= 1000000000 ? 0 : 1)}亿`;
+  if (number >= 10000) return `${trimMetric(number / 10000, number >= 100000 ? 0 : 1)}万`;
   return String(number);
+}
+
+function formatOptionalMetric(value) {
+  if (value === undefined || value === null) return "...";
+  return formatMetric(value);
+}
+
+function trimMetric(value, digits) {
+  return value.toFixed(digits).replace(/\.0$/, "");
 }
 
 function getFeedTrackStyle(swipe) {
@@ -1364,12 +1998,12 @@ function formatRelativeTime(value) {
   const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
   if (seconds < 60) return "刚刚";
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 60) return `${minutes} 分钟前`;
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return `${hours} 小时前`;
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
-  return new Date(value).toLocaleDateString();
+  if (days < 7) return `${days} 天前`;
+  return new Date(value).toLocaleDateString("zh-CN");
 }
 
 export default App;
