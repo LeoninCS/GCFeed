@@ -20,7 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type interactionToggleAPIResponse struct {
+type interactionActionAPIResponse struct {
 	VideoID       int64  `json:"video_id"`
 	ActionType    string `json:"action_type"`
 	Active        bool   `json:"active"`
@@ -89,7 +89,7 @@ func newMemoryInteractionRepo() *memoryInteractionRepo {
 	}
 }
 
-func (r *memoryInteractionRepo) ToggleAction(ctx context.Context, userID int64, videoID int64, actionType string, idempotencyKey string) (*domaininteraction.Action, int, error) {
+func (r *memoryInteractionRepo) SetAction(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*domaininteraction.Action, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -103,30 +103,38 @@ func (r *memoryInteractionRepo) ToggleAction(ctx context.Context, userID int64, 
 		return cloneInteractionAction(action), r.actionCount(videoID, actionType), nil
 	}
 
+	nextStatus := domaininteraction.ActionStatusCanceled
+	if active {
+		nextStatus = domaininteraction.ActionStatusActive
+	}
+
 	if !exists {
 		action = &domaininteraction.Action{
 			ID:             r.nextActionID,
 			UserID:         userID,
 			VideoID:        videoID,
 			ActionType:     actionType,
-			Status:         domaininteraction.ActionStatusActive,
+			Status:         nextStatus,
 			IdempotencyKey: strings.TrimSpace(idempotencyKey),
 			CreatedAt:      time.Now(),
 			UpdatedAt:      time.Now(),
 		}
 		r.nextActionID++
 		r.actions[key] = action
-		r.addActionCount(videoID, actionType, 1)
+		if active {
+			r.addActionCount(videoID, actionType, 1)
+		}
 		return cloneInteractionAction(action), r.actionCount(videoID, actionType), nil
 	}
 
-	if action.Status == domaininteraction.ActionStatusActive {
-		action.Status = domaininteraction.ActionStatusCanceled
-		r.addActionCount(videoID, actionType, -1)
-	} else {
-		action.Status = domaininteraction.ActionStatusActive
-		r.addActionCount(videoID, actionType, 1)
+	if action.Status != nextStatus {
+		if active {
+			r.addActionCount(videoID, actionType, 1)
+		} else {
+			r.addActionCount(videoID, actionType, -1)
+		}
 	}
+	action.Status = nextStatus
 	action.IdempotencyKey = strings.TrimSpace(idempotencyKey)
 	action.UpdatedAt = time.Now()
 	return cloneInteractionAction(action), r.actionCount(videoID, actionType), nil
@@ -226,38 +234,38 @@ func (r *memoryInteractionRepo) DeleteComment(ctx context.Context, commentID int
 	return cloneInteractionComment(comment), r.stats[comment.VideoID].CommentCount, nil
 }
 
-func TestInteractionToggleFlow(t *testing.T) {
+func TestInteractionActionFlow(t *testing.T) {
 	router, jwtManager := newInteractionRouter(t)
 	token := signTestToken(t, jwtManager, 42)
 
-	likeResponse := performVideoJSONRequest(router, http.MethodPost, "/api/interactions/likes/toggle", `{"video_id":1001}`, token, "like-1")
+	likeResponse := performVideoJSONRequest(router, http.MethodPut, "/api/videos/1001/like", "", token, "like-1")
 	requireStatus(t, likeResponse, http.StatusOK)
 
-	var liked interactionToggleAPIResponse
+	var liked interactionActionAPIResponse
 	decodeJSON(t, likeResponse, &liked)
 	if liked.ActionType != domaininteraction.ActionTypeLike || !liked.Active || liked.LikeCount != 1 {
 		t.Fatalf("unexpected like response: %+v", liked)
 	}
 
-	replayResponse := performVideoJSONRequest(router, http.MethodPost, "/api/interactions/likes/toggle", `{"video_id":1001}`, token, "like-1")
+	replayResponse := performVideoJSONRequest(router, http.MethodPut, "/api/videos/1001/like", "", token, "like-1")
 	requireStatus(t, replayResponse, http.StatusOK)
-	var replayed interactionToggleAPIResponse
+	var replayed interactionActionAPIResponse
 	decodeJSON(t, replayResponse, &replayed)
 	if !replayed.Active || replayed.LikeCount != 1 {
 		t.Fatalf("unexpected replay response: %+v", replayed)
 	}
 
-	unlikeResponse := performVideoJSONRequest(router, http.MethodPost, "/api/interactions/likes/toggle", `{"video_id":1001}`, token, "like-2")
+	unlikeResponse := performVideoJSONRequest(router, http.MethodDelete, "/api/videos/1001/like", "", token, "like-2")
 	requireStatus(t, unlikeResponse, http.StatusOK)
-	var unliked interactionToggleAPIResponse
+	var unliked interactionActionAPIResponse
 	decodeJSON(t, unlikeResponse, &unliked)
 	if unliked.Active || unliked.LikeCount != 0 {
 		t.Fatalf("unexpected unlike response: %+v", unliked)
 	}
 
-	favoriteResponse := performVideoJSONRequest(router, http.MethodPost, "/api/interactions/favorites/toggle", `{"video_id":1001}`, token, "favorite-1")
+	favoriteResponse := performVideoJSONRequest(router, http.MethodPut, "/api/videos/1001/favorite", "", token, "favorite-1")
 	requireStatus(t, favoriteResponse, http.StatusOK)
-	var favorited interactionToggleAPIResponse
+	var favorited interactionActionAPIResponse
 	decodeJSON(t, favoriteResponse, &favorited)
 	if favorited.ActionType != domaininteraction.ActionTypeFavorite || !favorited.Active || favorited.FavoriteCount != 1 {
 		t.Fatalf("unexpected favorite response: %+v", favorited)
@@ -270,7 +278,7 @@ func TestInteractionCommentFlow(t *testing.T) {
 	commenterToken := signTestToken(t, jwtManager, 77)
 	otherToken := signTestToken(t, jwtManager, 99)
 
-	createResponse := performVideoJSONRequest(router, http.MethodPost, "/api/interactions/comments", `{"video_id":1001,"content":" first comment "}`, commenterToken, "comment-1")
+	createResponse := performVideoJSONRequest(router, http.MethodPost, "/api/videos/1001/comments", `{"content":" first comment "}`, commenterToken, "comment-1")
 	requireStatus(t, createResponse, http.StatusCreated)
 
 	var created interactionCommentAPIResponse
@@ -279,7 +287,7 @@ func TestInteractionCommentFlow(t *testing.T) {
 		t.Fatalf("unexpected comment response: %+v", created)
 	}
 
-	replayResponse := performVideoJSONRequest(router, http.MethodPost, "/api/interactions/comments", `{"video_id":1001,"content":"changed"}`, commenterToken, "comment-1")
+	replayResponse := performVideoJSONRequest(router, http.MethodPost, "/api/videos/1001/comments", `{"content":"changed"}`, commenterToken, "comment-1")
 	requireStatus(t, replayResponse, http.StatusCreated)
 	var replayed interactionCommentAPIResponse
 	decodeJSON(t, replayResponse, &replayed)
@@ -287,7 +295,7 @@ func TestInteractionCommentFlow(t *testing.T) {
 		t.Fatalf("unexpected replay comment response: %+v", replayed)
 	}
 
-	listResponse := performJSONRequest(router, http.MethodGet, "/api/interactions/comments?video_id=1001&limit=10", "", "")
+	listResponse := performJSONRequest(router, http.MethodGet, "/api/videos/1001/comments?limit=10", "", "")
 	requireStatus(t, listResponse, http.StatusOK)
 	var list interactionCommentListAPIResponse
 	decodeJSON(t, listResponse, &list)
@@ -295,10 +303,10 @@ func TestInteractionCommentFlow(t *testing.T) {
 		t.Fatalf("unexpected comment list response: %+v", list)
 	}
 
-	forbiddenDelete := performJSONRequest(router, http.MethodDelete, "/api/interactions/comments/1", "", otherToken)
+	forbiddenDelete := performJSONRequest(router, http.MethodDelete, "/api/comments/1", "", otherToken)
 	requireStatus(t, forbiddenDelete, http.StatusForbidden)
 
-	authorDelete := performJSONRequest(router, http.MethodDelete, "/api/interactions/comments/1", "", authorToken)
+	authorDelete := performJSONRequest(router, http.MethodDelete, "/api/comments/1", "", authorToken)
 	requireStatus(t, authorDelete, http.StatusOK)
 	var deleted interactionDeleteCommentAPIResponse
 	decodeJSON(t, authorDelete, &deleted)
@@ -306,7 +314,7 @@ func TestInteractionCommentFlow(t *testing.T) {
 		t.Fatalf("unexpected delete response: %+v", deleted)
 	}
 
-	repeatDelete := performJSONRequest(router, http.MethodDelete, "/api/interactions/comments/1", "", authorToken)
+	repeatDelete := performJSONRequest(router, http.MethodDelete, "/api/comments/1", "", authorToken)
 	requireStatus(t, repeatDelete, http.StatusOK)
 	var repeat interactionDeleteCommentAPIResponse
 	decodeJSON(t, repeatDelete, &repeat)
@@ -319,19 +327,19 @@ func TestInteractionValidation(t *testing.T) {
 	router, jwtManager := newInteractionRouter(t)
 	token := signTestToken(t, jwtManager, 42)
 
-	unauthorizedLike := performJSONRequest(router, http.MethodPost, "/api/interactions/likes/toggle", `{"video_id":1001}`, "")
+	unauthorizedLike := performJSONRequest(router, http.MethodPut, "/api/videos/1001/like", "", "")
 	requireStatus(t, unauthorizedLike, http.StatusUnauthorized)
 
-	badLike := performJSONRequest(router, http.MethodPost, "/api/interactions/likes/toggle", `{"video_id":0}`, token)
+	badLike := performJSONRequest(router, http.MethodPut, "/api/videos/0/like", "", token)
 	requireStatus(t, badLike, http.StatusBadRequest)
 
-	missingVideo := performJSONRequest(router, http.MethodPost, "/api/interactions/likes/toggle", `{"video_id":404}`, token)
+	missingVideo := performJSONRequest(router, http.MethodPut, "/api/videos/404/like", "", token)
 	requireStatus(t, missingVideo, http.StatusNotFound)
 
-	emptyComment := performJSONRequest(router, http.MethodPost, "/api/interactions/comments", `{"video_id":1001,"content":"   "}`, token)
+	emptyComment := performJSONRequest(router, http.MethodPost, "/api/videos/1001/comments", `{"content":"   "}`, token)
 	requireStatus(t, emptyComment, http.StatusBadRequest)
 
-	badList := performJSONRequest(router, http.MethodGet, "/api/interactions/comments?video_id=1001&limit=0", "", "")
+	badList := performJSONRequest(router, http.MethodGet, "/api/videos/1001/comments?limit=0", "", "")
 	requireStatus(t, badList, http.StatusBadRequest)
 }
 
@@ -352,12 +360,14 @@ func newInteractionRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	authMiddleware := interfaceshttpmiddleware.NewJWTAuth(jwtManager)
 
 	api := router.Group("/api")
-	interactions := api.Group("/interactions")
-	interactions.POST("/likes/toggle", authMiddleware, handler.ToggleLike)
-	interactions.POST("/favorites/toggle", authMiddleware, handler.ToggleFavorite)
-	interactions.POST("/comments", authMiddleware, handler.CreateComment)
-	interactions.GET("/comments", handler.ListComments)
-	interactions.DELETE("/comments/:commentId", authMiddleware, handler.DeleteComment)
+	videos := api.Group("/videos")
+	videos.PUT("/:videoId/like", authMiddleware, handler.Like)
+	videos.DELETE("/:videoId/like", authMiddleware, handler.Unlike)
+	videos.PUT("/:videoId/favorite", authMiddleware, handler.Favorite)
+	videos.DELETE("/:videoId/favorite", authMiddleware, handler.Unfavorite)
+	videos.POST("/:videoId/comments", authMiddleware, handler.CreateComment)
+	videos.GET("/:videoId/comments", handler.ListComments)
+	api.DELETE("/comments/:commentId", authMiddleware, handler.DeleteComment)
 
 	return router, jwtManager
 }

@@ -36,7 +36,7 @@ func New(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) ToggleAction(ctx context.Context, userID int64, videoID int64, actionType string, idempotencyKey string) (*domaininteraction.Action, int, error) {
+func (r *Repository) SetAction(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*domaininteraction.Action, int, error) {
 	actionType, err := domaininteraction.NormalizeActionType(actionType)
 	if err != nil {
 		return nil, 0, err
@@ -59,19 +59,21 @@ func (r *Repository) ToggleAction(ctx context.Context, userID int64, videoID int
 		}
 
 		delta := 0
-		nextStatus := domaininteraction.ActionStatusActive
+		nextStatus := actionStatusFromActive(active)
 		if errors.Is(findErr, gorm.ErrRecordNotFound) {
 			action = ActionModel{
 				UserID:         userID,
 				VideoID:        videoID,
 				ActionType:     actionType,
-				Status:         domaininteraction.ActionStatusActive,
+				Status:         nextStatus,
 				IdempotencyKey: idempotencyKeyPtr(idempotencyKey),
 			}
 			if err := tx.Create(&action).Error; err != nil {
 				return err
 			}
-			delta = 1
+			if active {
+				delta = 1
+			}
 		} else {
 			if idempotencyKey != "" && idempotencyKeyValue(action.IdempotencyKey) == idempotencyKey {
 				currentCount, err := currentActionCount(tx, videoID, actionType)
@@ -82,18 +84,31 @@ func (r *Repository) ToggleAction(ctx context.Context, userID int64, videoID int
 				return nil
 			}
 
-			if action.Status == domaininteraction.ActionStatusActive {
-				nextStatus = domaininteraction.ActionStatusCanceled
-				delta = -1
-			} else {
-				nextStatus = domaininteraction.ActionStatusActive
-				delta = 1
+			previousStatus := action.Status
+			previousIdempotencyKey := idempotencyKeyValue(action.IdempotencyKey)
+			if action.Status != nextStatus {
+				if active {
+					delta = 1
+				} else {
+					delta = -1
+				}
 			}
 			action.Status = nextStatus
 			action.IdempotencyKey = idempotencyKeyPtr(idempotencyKey)
-			if err := tx.Save(&action).Error; err != nil {
+			if previousStatus != nextStatus || previousIdempotencyKey != idempotencyKey {
+				if err := tx.Save(&action).Error; err != nil {
+					return err
+				}
+			}
+		}
+
+		if delta == 0 {
+			currentCount, err := currentActionCount(tx, videoID, actionType)
+			if err != nil {
 				return err
 			}
+			count = currentCount
+			return nil
 		}
 
 		count, err = updateActionStat(tx, videoID, actionType, delta)
@@ -103,6 +118,13 @@ func (r *Repository) ToggleAction(ctx context.Context, userID int64, videoID int
 		return nil, 0, mapVideoError(err)
 	}
 	return restoreAction(action), count, nil
+}
+
+func actionStatusFromActive(active bool) int {
+	if active {
+		return domaininteraction.ActionStatusActive
+	}
+	return domaininteraction.ActionStatusCanceled
 }
 
 func (r *Repository) CreateComment(ctx context.Context, comment *domaininteraction.Comment) (*domaininteraction.Comment, int, error) {

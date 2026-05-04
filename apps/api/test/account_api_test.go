@@ -111,7 +111,7 @@ func TestAccountAPIFlow(t *testing.T) {
 	registerResponse := performJSONRequest(
 		router,
 		http.MethodPost,
-		"/api/auth/register",
+		"/api/users",
 		`{"account":"test","password":"12345678","nickname":"tester"}`,
 		"",
 	)
@@ -129,7 +129,7 @@ func TestAccountAPIFlow(t *testing.T) {
 	duplicateResponse := performJSONRequest(
 		router,
 		http.MethodPost,
-		"/api/auth/register",
+		"/api/users",
 		`{"account":"test","password":"12345678","nickname":"tester"}`,
 		"",
 	)
@@ -138,7 +138,7 @@ func TestAccountAPIFlow(t *testing.T) {
 	loginResponse := performJSONRequest(
 		router,
 		http.MethodPost,
-		"/api/auth/login/password",
+		"/api/sessions",
 		`{"account":"test","password":"12345678"}`,
 		"",
 	)
@@ -174,7 +174,7 @@ func TestAccountAPIFlow(t *testing.T) {
 		t.Fatalf("unexpected updated profile response: %+v", updated)
 	}
 
-	logoutResponse := performJSONRequest(router, http.MethodPost, "/api/auth/logout", "", token.AccessToken)
+	logoutResponse := performJSONRequest(router, http.MethodDelete, "/api/sessions/current", "", token.AccessToken)
 	requireStatus(t, logoutResponse, http.StatusNoContent)
 }
 
@@ -184,7 +184,7 @@ func TestAccountAPIValidation(t *testing.T) {
 	registerResponse := performJSONRequest(
 		router,
 		http.MethodPost,
-		"/api/auth/register",
+		"/api/users",
 		`{"account":"test","password":"","nickname":"tester"}`,
 		"",
 	)
@@ -193,7 +193,7 @@ func TestAccountAPIValidation(t *testing.T) {
 	loginResponse := performJSONRequest(
 		router,
 		http.MethodPost,
-		"/api/auth/login/password",
+		"/api/sessions",
 		`{"account":"","password":"12345678"}`,
 		"",
 	)
@@ -223,7 +223,7 @@ func registerAndLogin(t *testing.T, router *gin.Engine) string {
 	registerResponse := performJSONRequest(
 		router,
 		http.MethodPost,
-		"/api/auth/register",
+		"/api/users",
 		`{"account":"login-user","password":"12345678","nickname":"login tester"}`,
 		"",
 	)
@@ -232,7 +232,7 @@ func registerAndLogin(t *testing.T, router *gin.Engine) string {
 	loginResponse := performJSONRequest(
 		router,
 		http.MethodPost,
-		"/api/auth/login/password",
+		"/api/sessions",
 		`{"account":"login-user","password":"12345678"}`,
 		"",
 	)
@@ -262,14 +262,14 @@ func newAccountRouter(t *testing.T) *gin.Engine {
 	authMiddleware := interfaceshttpmiddleware.NewJWTAuth(jwtManager)
 
 	api := router.Group("/api")
-	auth := api.Group("/auth")
-	auth.POST("/register", handler.Register)
-	auth.POST("/login/password", handler.Login)
-	auth.POST("/logout", authMiddleware, handler.Logout)
+	sessions := api.Group("/sessions")
+	sessions.POST("", handler.Login)
+	sessions.DELETE("/current", authMiddleware, handler.Logout)
 
-	users := api.Group("/users", authMiddleware)
-	users.GET("/me", handler.Me)
-	users.PATCH("/me", handler.UpdateMe)
+	users := api.Group("/users")
+	users.POST("", handler.Register)
+	users.GET("/me", authMiddleware, handler.Me)
+	users.PATCH("/me", authMiddleware, handler.UpdateMe)
 
 	return router
 }

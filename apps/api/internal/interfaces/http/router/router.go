@@ -70,36 +70,33 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	authMiddleware := interfaceshttpmiddleware.NewJWTAuth(jwtManager)
 	api := g.Group("/api")
 
-	auth := api.Group("/auth")
-	auth.POST("/register", accountHandler.Register)
-	auth.POST("/login/password", accountHandler.Login)
-	auth.POST("/logout", authMiddleware, accountHandler.Logout)
+	sessions := api.Group("/sessions")
+	sessions.POST("", accountHandler.Login)
+	sessions.DELETE("/current", authMiddleware, accountHandler.Logout)
 
-	users := api.Group("/users", authMiddleware)
-	users.GET("/me", accountHandler.Me)
-	users.PATCH("/me", accountHandler.UpdateMe)
+	users := api.Group("/users")
+	users.POST("", accountHandler.Register)
+	users.GET("/me", authMiddleware, accountHandler.Me)
+	users.PATCH("/me", authMiddleware, accountHandler.UpdateMe)
+	users.GET("/me/videos", authMiddleware, videoHandler.ListMine)
+	users.GET("/:userId/videos", videoHandler.ListByAuthor)
 
 	videos := api.Group("/videos")
 	videos.POST("", authMiddleware, videoHandler.Create)
-	videos.GET("/mine", authMiddleware, videoHandler.ListMine)
 	videos.GET("/:videoId", videoHandler.Get)
 	videos.DELETE("/:videoId", authMiddleware, videoHandler.Delete)
+	videos.PUT("/:videoId/like", authMiddleware, interactionHandler.Like)
+	videos.DELETE("/:videoId/like", authMiddleware, interactionHandler.Unlike)
+	videos.PUT("/:videoId/favorite", authMiddleware, interactionHandler.Favorite)
+	videos.DELETE("/:videoId/favorite", authMiddleware, interactionHandler.Unfavorite)
+	videos.POST("/:videoId/comments", authMiddleware, interactionHandler.CreateComment)
+	videos.GET("/:videoId/comments", interactionHandler.ListComments)
 
 	uploads := api.Group("/uploads", authMiddleware)
 	uploads.POST("", uploadHandler.Create)
 
-	api.GET("/users/:userId/videos", videoHandler.ListByAuthor)
-
-	feed := api.Group("/feed")
-	feed.GET("/timeline", feedHandler.Timeline)
-	feed.GET("/refresh", feedHandler.Refresh)
-
-	interactions := api.Group("/interactions")
-	interactions.POST("/likes/toggle", authMiddleware, interactionHandler.ToggleLike)
-	interactions.POST("/favorites/toggle", authMiddleware, interactionHandler.ToggleFavorite)
-	interactions.POST("/comments", authMiddleware, interactionHandler.CreateComment)
-	interactions.GET("/comments", interactionHandler.ListComments)
-	interactions.DELETE("/comments/:commentId", authMiddleware, interactionHandler.DeleteComment)
+	api.GET("/feed-items", feedHandler.Timeline)
+	api.DELETE("/comments/:commentId", authMiddleware, interactionHandler.DeleteComment)
 
 	return nil
 }

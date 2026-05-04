@@ -71,7 +71,7 @@ func (r *memoryFeedRepo) ListTimelineFeed(ctx context.Context, cursor *domainfee
 func TestFeedAPIFlow(t *testing.T) {
 	router := newFeedRouter(seedFeedItems())
 
-	firstPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed/timeline?limit=2", "", "")
+	firstPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?limit=2", "", "")
 	requireStatus(t, firstPageResponse, http.StatusOK)
 
 	var firstPage feedAPIResponse
@@ -86,7 +86,7 @@ func TestFeedAPIFlow(t *testing.T) {
 		t.Fatalf("unexpected first page cursor: %+v", firstPage)
 	}
 
-	secondPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed/timeline?cursor="+firstPage.NextCursor+"&limit=2", "", "")
+	secondPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?cursor="+firstPage.NextCursor+"&limit=2", "", "")
 	requireStatus(t, secondPageResponse, http.StatusOK)
 
 	var secondPage feedAPIResponse
@@ -95,7 +95,7 @@ func TestFeedAPIFlow(t *testing.T) {
 		t.Fatalf("unexpected second page response: %+v", secondPage)
 	}
 
-	refreshResponse := performJSONRequest(router, http.MethodGet, "/api/feed/refresh?limit=1", "", "")
+	refreshResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?limit=1", "", "")
 	requireStatus(t, refreshResponse, http.StatusOK)
 
 	var refresh feedAPIResponse
@@ -108,10 +108,10 @@ func TestFeedAPIFlow(t *testing.T) {
 func TestFeedAPIValidation(t *testing.T) {
 	router := newFeedRouter(seedFeedItems())
 
-	badLimitResponse := performJSONRequest(router, http.MethodGet, "/api/feed/timeline?limit=0", "", "")
+	badLimitResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?limit=0", "", "")
 	requireStatus(t, badLimitResponse, http.StatusBadRequest)
 
-	badCursorResponse := performJSONRequest(router, http.MethodGet, "/api/feed/timeline?cursor=bad-cursor", "", "")
+	badCursorResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?cursor=bad-cursor", "", "")
 	requireStatus(t, badCursorResponse, http.StatusBadRequest)
 }
 
@@ -124,9 +124,7 @@ func newFeedRouter(items []*domainfeed.FeedItem) *gin.Engine {
 	handler := interfaceshttpfeed.NewHandler(service)
 
 	api := router.Group("/api")
-	feed := api.Group("/feed")
-	feed.GET("/timeline", handler.Timeline)
-	feed.GET("/refresh", handler.Refresh)
+	api.GET("/feed-items", handler.Timeline)
 
 	return router
 }

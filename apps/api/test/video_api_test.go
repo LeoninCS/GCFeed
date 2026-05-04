@@ -208,7 +208,7 @@ func TestVideoAPIFlow(t *testing.T) {
 		t.Fatalf("unexpected author list response: %+v", list)
 	}
 
-	mineResponse := performJSONRequest(router, http.MethodGet, "/api/videos/mine", "", token)
+	mineResponse := performJSONRequest(router, http.MethodGet, "/api/users/me/videos", "", token)
 	requireStatus(t, mineResponse, http.StatusOK)
 
 	var mine videoListAPIResponse
@@ -306,10 +306,11 @@ func newVideoRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	api := router.Group("/api")
 	videos := api.Group("/videos")
 	videos.POST("", authMiddleware, handler.Create)
-	videos.GET("/mine", authMiddleware, handler.ListMine)
 	videos.GET("/:videoId", handler.Get)
 	videos.DELETE("/:videoId", authMiddleware, handler.Delete)
-	api.GET("/users/:userId/videos", handler.ListByAuthor)
+	users := api.Group("/users")
+	users.GET("/me/videos", authMiddleware, handler.ListMine)
+	users.GET("/:userId/videos", handler.ListByAuthor)
 
 	return router, jwtManager
 }

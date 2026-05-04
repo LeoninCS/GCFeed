@@ -20,7 +20,7 @@ type Service struct {
 	repo domaininteraction.Repository
 }
 
-type ToggleActionResult struct {
+type ActionResult struct {
 	VideoID       int64
 	ActionType    string
 	Active        bool
@@ -54,12 +54,20 @@ func NewService(repo domaininteraction.Repository) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) ToggleLike(ctx context.Context, userID int64, videoID int64, idempotencyKey string) (*ToggleActionResult, error) {
-	return s.toggleAction(ctx, userID, videoID, domaininteraction.ActionTypeLike, idempotencyKey)
+func (s *Service) Like(ctx context.Context, userID int64, videoID int64, idempotencyKey string) (*ActionResult, error) {
+	return s.setAction(ctx, userID, videoID, domaininteraction.ActionTypeLike, true, idempotencyKey)
 }
 
-func (s *Service) ToggleFavorite(ctx context.Context, userID int64, videoID int64, idempotencyKey string) (*ToggleActionResult, error) {
-	return s.toggleAction(ctx, userID, videoID, domaininteraction.ActionTypeFavorite, idempotencyKey)
+func (s *Service) Unlike(ctx context.Context, userID int64, videoID int64, idempotencyKey string) (*ActionResult, error) {
+	return s.setAction(ctx, userID, videoID, domaininteraction.ActionTypeLike, false, idempotencyKey)
+}
+
+func (s *Service) Favorite(ctx context.Context, userID int64, videoID int64, idempotencyKey string) (*ActionResult, error) {
+	return s.setAction(ctx, userID, videoID, domaininteraction.ActionTypeFavorite, true, idempotencyKey)
+}
+
+func (s *Service) Unfavorite(ctx context.Context, userID int64, videoID int64, idempotencyKey string) (*ActionResult, error) {
+	return s.setAction(ctx, userID, videoID, domaininteraction.ActionTypeFavorite, false, idempotencyKey)
 }
 
 func (s *Service) CreateComment(ctx context.Context, userID int64, videoID int64, content string, idempotencyKey string) (*CreateCommentResult, error) {
@@ -154,7 +162,7 @@ func (s *Service) DeleteComment(ctx context.Context, commentID int64, userID int
 	}, nil
 }
 
-func (s *Service) toggleAction(ctx context.Context, userID int64, videoID int64, actionType string, idempotencyKey string) (*ToggleActionResult, error) {
+func (s *Service) setAction(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*ActionResult, error) {
 	if userID <= 0 {
 		return nil, domaininteraction.ErrInvalidUserID
 	}
@@ -170,7 +178,7 @@ func (s *Service) toggleAction(ctx context.Context, userID int64, videoID int64,
 		return nil, err
 	}
 
-	action, count, err := s.repo.ToggleAction(ctx, userID, videoID, actionType, idempotencyKey)
+	action, count, err := s.repo.SetAction(ctx, userID, videoID, actionType, active, idempotencyKey)
 	if err != nil {
 		if errors.Is(err, domaininteraction.ErrVideoNotFound) {
 			return nil, domaininteraction.ErrVideoNotFound
@@ -178,7 +186,7 @@ func (s *Service) toggleAction(ctx context.Context, userID int64, videoID int64,
 		return nil, ErrUpdateInteractionFailed
 	}
 
-	result := &ToggleActionResult{
+	result := &ActionResult{
 		VideoID:    action.VideoID,
 		ActionType: action.ActionType,
 		Active:     action.Active(),

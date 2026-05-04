@@ -2,16 +2,11 @@ package interfaceshttpinteraction
 
 import "time"
 
-type toggleActionRequest struct {
-	VideoID int64 `json:"video_id"`
-}
-
 type createCommentRequest struct {
-	VideoID int64  `json:"video_id"`
 	Content string `json:"content"`
 }
 
-type toggleActionResponse struct {
+type actionResponse struct {
 	VideoID       int64  `json:"video_id"`
 	ActionType    string `json:"action_type"`
 	Active        bool   `json:"active"`

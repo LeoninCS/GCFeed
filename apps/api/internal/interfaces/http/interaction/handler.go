@@ -20,46 +20,20 @@ func NewHandler(service *applicationinteraction.Service) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) ToggleLike(c *gin.Context) {
-	userID, ok := userIDFromContext(c)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid access token"})
-		return
-	}
-
-	var req toggleActionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
-
-	result, err := h.service.ToggleLike(c.Request.Context(), userID, req.VideoID, c.GetHeader("Idempotency-Key"))
-	if err != nil {
-		writeInteractionError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, toggleActionResponseFromResult(result))
+func (h *Handler) Like(c *gin.Context) {
+	h.setLike(c, true)
 }
 
-func (h *Handler) ToggleFavorite(c *gin.Context) {
-	userID, ok := userIDFromContext(c)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid access token"})
-		return
-	}
+func (h *Handler) Unlike(c *gin.Context) {
+	h.setLike(c, false)
+}
 
-	var req toggleActionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
+func (h *Handler) Favorite(c *gin.Context) {
+	h.setFavorite(c, true)
+}
 
-	result, err := h.service.ToggleFavorite(c.Request.Context(), userID, req.VideoID, c.GetHeader("Idempotency-Key"))
-	if err != nil {
-		writeInteractionError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, toggleActionResponseFromResult(result))
+func (h *Handler) Unfavorite(c *gin.Context) {
+	h.setFavorite(c, false)
 }
 
 func (h *Handler) CreateComment(c *gin.Context) {
@@ -69,13 +43,19 @@ func (h *Handler) CreateComment(c *gin.Context) {
 		return
 	}
 
+	videoID, err := parsePositiveInt64(c.Param("videoId"), domaininteraction.ErrInvalidVideoID)
+	if err != nil {
+		writeInteractionError(c, err)
+		return
+	}
+
 	var req createCommentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
-	result, err := h.service.CreateComment(c.Request.Context(), userID, req.VideoID, req.Content, c.GetHeader("Idempotency-Key"))
+	result, err := h.service.CreateComment(c.Request.Context(), userID, videoID, req.Content, c.GetHeader("Idempotency-Key"))
 	if err != nil {
 		writeInteractionError(c, err)
 		return
@@ -84,7 +64,7 @@ func (h *Handler) CreateComment(c *gin.Context) {
 }
 
 func (h *Handler) ListComments(c *gin.Context) {
-	videoID, err := parsePositiveInt64(c.Query("video_id"), domaininteraction.ErrInvalidVideoID)
+	videoID, err := parsePositiveInt64(c.Param("videoId"), domaininteraction.ErrInvalidVideoID)
 	if err != nil {
 		writeInteractionError(c, err)
 		return
@@ -130,6 +110,58 @@ func (h *Handler) DeleteComment(c *gin.Context) {
 	})
 }
 
+func (h *Handler) setLike(c *gin.Context, active bool) {
+	userID, ok := userIDFromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid access token"})
+		return
+	}
+
+	videoID, err := parsePositiveInt64(c.Param("videoId"), domaininteraction.ErrInvalidVideoID)
+	if err != nil {
+		writeInteractionError(c, err)
+		return
+	}
+
+	var result *applicationinteraction.ActionResult
+	if active {
+		result, err = h.service.Like(c.Request.Context(), userID, videoID, c.GetHeader("Idempotency-Key"))
+	} else {
+		result, err = h.service.Unlike(c.Request.Context(), userID, videoID, c.GetHeader("Idempotency-Key"))
+	}
+	if err != nil {
+		writeInteractionError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, actionResponseFromResult(result))
+}
+
+func (h *Handler) setFavorite(c *gin.Context, active bool) {
+	userID, ok := userIDFromContext(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid access token"})
+		return
+	}
+
+	videoID, err := parsePositiveInt64(c.Param("videoId"), domaininteraction.ErrInvalidVideoID)
+	if err != nil {
+		writeInteractionError(c, err)
+		return
+	}
+
+	var result *applicationinteraction.ActionResult
+	if active {
+		result, err = h.service.Favorite(c.Request.Context(), userID, videoID, c.GetHeader("Idempotency-Key"))
+	} else {
+		result, err = h.service.Unfavorite(c.Request.Context(), userID, videoID, c.GetHeader("Idempotency-Key"))
+	}
+	if err != nil {
+		writeInteractionError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, actionResponseFromResult(result))
+}
+
 func userIDFromContext(c *gin.Context) (int64, bool) {
 	value, exists := c.Get(interfaceshttpmiddleware.ContextUserIDKey)
 	if !exists {
@@ -168,8 +200,8 @@ func parseLimit(raw string) (int, error) {
 	return limit, nil
 }
 
-func toggleActionResponseFromResult(result *applicationinteraction.ToggleActionResult) toggleActionResponse {
-	return toggleActionResponse{
+func actionResponseFromResult(result *applicationinteraction.ActionResult) actionResponse {
+	return actionResponse{
 		VideoID:       result.VideoID,
 		ActionType:    result.ActionType,
 		Active:        result.Active,

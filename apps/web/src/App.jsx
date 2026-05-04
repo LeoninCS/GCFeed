@@ -127,7 +127,7 @@ function LoginPage({ session, onNavigate }) {
     setMessage("");
     try {
       if (mode === "register") {
-        await apiRequest("/api/auth/register", {
+        await apiRequest("/api/users", {
           method: "POST",
           body: {
             account: form.account.trim(),
@@ -136,7 +136,7 @@ function LoginPage({ session, onNavigate }) {
           }
         });
       }
-      const tokenResponse = await apiRequest("/api/auth/login/password", {
+      const tokenResponse = await apiRequest("/api/sessions", {
         method: "POST",
         body: {
           account: form.account.trim(),
@@ -316,7 +316,7 @@ function FeedPage({ session, onNavigate }) {
     let live = true;
     setFeedState("loading");
     setFeedError("");
-    apiRequest("/api/feed/timeline?limit=12", { token: session.token })
+    apiRequest("/api/feed-items?limit=12", { token: session.token })
       .then((data) => {
         if (!live) return;
         setSwipe(null);
@@ -372,17 +372,15 @@ function FeedPage({ session, onNavigate }) {
     return false;
   }, [onNavigate, session.token]);
 
-  const toggleLike = useCallback(async () => {
+  const setLike = useCallback(async () => {
     if (!current || swipe || !requireLogin()) return;
     try {
-      const data = await apiRequest("/api/interactions/likes/toggle", {
-        method: "POST",
+      const nextLiked = !Boolean(liked[current.video_id]);
+      const data = await apiRequest(`/api/videos/${current.video_id}/like`, {
+        method: nextLiked ? "PUT" : "DELETE",
         token: session.token,
         headers: {
           "Idempotency-Key": `web-like-${current.video_id}-${Date.now()}`
-        },
-        body: {
-          video_id: current.video_id
         }
       });
       setLiked((state) => ({ ...state, [current.video_id]: Boolean(data.active) }));
@@ -393,19 +391,17 @@ function FeedPage({ session, onNavigate }) {
         onNavigate("/auth");
       }
     }
-  }, [current, onNavigate, requireLogin, session, swipe, updateCurrentItem]);
+  }, [current, liked, onNavigate, requireLogin, session, swipe, updateCurrentItem]);
 
-  const toggleFavorite = useCallback(async () => {
+  const setFavorite = useCallback(async () => {
     if (!current || swipe || !requireLogin()) return;
     try {
-      const data = await apiRequest("/api/interactions/favorites/toggle", {
-        method: "POST",
+      const nextFavorited = !Boolean(favorited[current.video_id]);
+      const data = await apiRequest(`/api/videos/${current.video_id}/favorite`, {
+        method: nextFavorited ? "PUT" : "DELETE",
         token: session.token,
         headers: {
           "Idempotency-Key": `web-favorite-${current.video_id}-${Date.now()}`
-        },
-        body: {
-          video_id: current.video_id
         }
       });
       setFavorited((state) => ({ ...state, [current.video_id]: Boolean(data.active) }));
@@ -416,14 +412,14 @@ function FeedPage({ session, onNavigate }) {
         onNavigate("/auth");
       }
     }
-  }, [current, onNavigate, requireLogin, session, swipe, updateCurrentItem]);
+  }, [current, favorited, onNavigate, requireLogin, session, swipe, updateCurrentItem]);
 
   const loadComments = useCallback(() => {
     if (!current) return undefined;
     let live = true;
     setCommentsState("loading");
     setCommentsError("");
-    apiRequest(`/api/interactions/comments?video_id=${current.video_id}&limit=50`)
+    apiRequest(`/api/videos/${current.video_id}/comments?limit=50`)
       .then((data) => {
         if (!live) return;
         setComments(data.items || []);
@@ -450,14 +446,13 @@ function FeedPage({ session, onNavigate }) {
     const content = commentText.trim();
     if (!content) return;
     try {
-      const data = await apiRequest("/api/interactions/comments", {
+      const data = await apiRequest(`/api/videos/${current.video_id}/comments`, {
         method: "POST",
         token: session.token,
         headers: {
           "Idempotency-Key": `web-comment-${current.video_id}-${Date.now()}`
         },
         body: {
-          video_id: current.video_id,
           content
         }
       });
@@ -608,10 +603,10 @@ function FeedPage({ session, onNavigate }) {
         moveTo(Math.max(0, index - 1));
       }
       if (event.key === "l" || event.key === "L") {
-        toggleLike();
+        setLike();
       }
       if (event.key === "f" || event.key === "F") {
-        toggleFavorite();
+        setFavorite();
       }
       if (event.key === "c" || event.key === "C") {
         setCommentsOpen(true);
@@ -619,7 +614,7 @@ function FeedPage({ session, onNavigate }) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [index, items.length, toggleFavorite, toggleLike, swipe]);
+  }, [index, items.length, setFavorite, setLike, swipe]);
 
   function goNext() {
     moveTo(Math.min(items.length - 1, index + 1));
@@ -669,9 +664,9 @@ function FeedPage({ session, onNavigate }) {
                     item={visibleNext}
                     liked={Boolean(liked[visibleNext.video_id])}
                     favorited={Boolean(favorited[visibleNext.video_id])}
-                    onLike={toggleLike}
+                    onLike={setLike}
                     onComment={() => setCommentsOpen(true)}
-                    onFavorite={toggleFavorite}
+                    onFavorite={setFavorite}
                   />
                 </div>
               )}
@@ -680,9 +675,9 @@ function FeedPage({ session, onNavigate }) {
                   item={visibleCurrent}
                   liked={Boolean(liked[visibleCurrent.video_id])}
                   favorited={Boolean(favorited[visibleCurrent.video_id])}
-                  onLike={toggleLike}
+                  onLike={setLike}
                   onComment={() => setCommentsOpen(true)}
-                  onFavorite={toggleFavorite}
+                  onFavorite={setFavorite}
                 />
               </div>
               {swipe?.direction === "next" && visibleNext && (
@@ -691,9 +686,9 @@ function FeedPage({ session, onNavigate }) {
                     item={visibleNext}
                     liked={Boolean(liked[visibleNext.video_id])}
                     favorited={Boolean(favorited[visibleNext.video_id])}
-                    onLike={toggleLike}
+                    onLike={setLike}
                     onComment={() => setCommentsOpen(true)}
-                    onFavorite={toggleFavorite}
+                    onFavorite={setFavorite}
                   />
                 </div>
               )}
@@ -884,7 +879,7 @@ function ProfilePage({ session, onNavigate }) {
       return;
     }
     setVideosState("loading");
-    apiRequest("/api/videos/mine?limit=12", { token: session.token })
+    apiRequest("/api/users/me/videos?limit=12", { token: session.token })
       .then((data) => {
         setVideos(data.items || []);
         setVideosState("ready");
@@ -1232,8 +1227,14 @@ function navigate(path, setRoute) {
 }
 
 function logout(session, setRoute) {
-  session.clearAuth();
-  navigate("/feed", setRoute);
+  if (session.token) {
+    apiRequest("/api/sessions/current", {
+      method: "DELETE",
+      token: session.token
+    }).catch(() => {});
+  }
+	session.clearAuth();
+	navigate("/feed", setRoute);
 }
 
 function readStoredUser() {
