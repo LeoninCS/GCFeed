@@ -4,17 +4,20 @@ import (
 	applicationaccount "GCFeed/internal/application/account"
 	applicationfeed "GCFeed/internal/application/feed"
 	applicationinteraction "GCFeed/internal/application/interaction"
+	applicationrelation "GCFeed/internal/application/relation"
 	applicationvideo "GCFeed/internal/application/video"
 	infraconfig "GCFeed/internal/infra/config"
 	infrajwt "GCFeed/internal/infra/jwt"
 	infraaccount "GCFeed/internal/infra/persistence/account"
 	infrafeed "GCFeed/internal/infra/persistence/feed"
 	infrainteraction "GCFeed/internal/infra/persistence/interaction"
+	infrarelation "GCFeed/internal/infra/persistence/relation"
 	infravideo "GCFeed/internal/infra/persistence/video"
 	interfaceshttpaccount "GCFeed/internal/interfaces/http/account"
 	interfaceshttpfeed "GCFeed/internal/interfaces/http/feed"
 	interfaceshttpinteraction "GCFeed/internal/interfaces/http/interaction"
 	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
+	interfaceshttprelation "GCFeed/internal/interfaces/http/relation"
 	interfaceshttpupload "GCFeed/internal/interfaces/http/upload"
 	interfaceshttpvideo "GCFeed/internal/interfaces/http/video"
 	"database/sql"
@@ -41,6 +44,8 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 		&infravideo.VideoStatModel{},
 		&infrainteraction.ActionModel{},
 		&infrainteraction.CommentModel{},
+		&infrarelation.FollowModel{},
+		&infrarelation.RelationStatModel{},
 	); err != nil {
 		return err
 	}
@@ -67,6 +72,9 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	interactionRepo := infrainteraction.New(gormDB)
 	interactionService := applicationinteraction.New(interactionRepo)
 	interactionHandler := interfaceshttpinteraction.New(interactionService)
+	relationRepo := infrarelation.New(gormDB)
+	relationService := applicationrelation.New(relationRepo)
+	relationHandler := interfaceshttprelation.New(relationService)
 	uploadHandler := interfaceshttpupload.New("./uploads")
 
 	g.GET("/health", HealthCheck)
@@ -88,6 +96,11 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	users.GET("/me", authMiddleware, accountHandler.Me)
 	users.PATCH("/me", authMiddleware, accountHandler.UpdateMe)
 	users.GET("/me/videos", authMiddleware, videoHandler.ListMine)
+	users.PUT("/me/following/:targetUserId", authMiddleware, relationHandler.Follow)
+	users.DELETE("/me/following/:targetUserId", authMiddleware, relationHandler.Unfollow)
+	users.GET("/me/following", authMiddleware, relationHandler.ListFollowing)
+	users.GET("/me/followers", authMiddleware, relationHandler.ListFollowers)
+	users.GET("/:userId", accountHandler.Get)
 	users.GET("/:userId/videos", videoHandler.ListByAuthor)
 
 	// 视频是互动资源的父资源，点赞、收藏和评论都挂在具体视频下。

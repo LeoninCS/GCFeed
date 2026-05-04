@@ -34,13 +34,16 @@ type LoginResult struct {
 
 // Profile 是应用层对外暴露的用户资料视图，屏蔽密码等敏感字段。
 type Profile struct {
-	ID        int64
-	Account   string
-	Nickname  string
-	AvatarURL string
-	Bio       string
-	Status    int
-	Role      string
+	ID             int64
+	Account        string
+	Nickname       string
+	AvatarURL      string
+	Bio            string
+	Status         int
+	Role           string
+	FollowingCount int
+	FollowerCount  int
+	WorkCount      int
 }
 
 func New(repo domainaccount.Repository, signer TokenSigner) *Service {
@@ -115,6 +118,23 @@ func (s *Service) GetProfile(ctx context.Context, userID int64) (*Profile, error
 	return profileFromUser(user), nil
 }
 
+// GetPublicProfile 根据用户 ID 读取公开资料，用于访问他人主页。
+func (s *Service) GetPublicProfile(ctx context.Context, userID int64) (*Profile, error) {
+	if userID <= 0 {
+		return nil, domainaccount.ErrInvalidUserID
+	}
+
+	user, err := s.repo.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, domainaccount.ErrUserNotFound) {
+			return nil, domainaccount.ErrUserNotFound
+		}
+		return nil, ErrLoadAccountFailed
+	}
+
+	return profileFromUser(user), nil
+}
+
 // UpdateProfile 支持部分更新，nil 表示该字段没有出现在请求体中。
 func (s *Service) UpdateProfile(ctx context.Context, userID int64, nickname, avatarURL, bio *string) (*Profile, error) {
 	if userID <= 0 {
@@ -144,12 +164,15 @@ func (s *Service) UpdateProfile(ctx context.Context, userID int64, nickname, ava
 // profileFromUser 把领域用户转换成安全的资料对象，避免向外暴露密码哈希。
 func profileFromUser(user *domainaccount.User) *Profile {
 	return &Profile{
-		ID:        user.ID,
-		Account:   user.Account,
-		Nickname:  user.Nickname,
-		AvatarURL: user.AvatarURL,
-		Bio:       user.Bio,
-		Status:    user.Status,
-		Role:      user.Role,
+		ID:             user.ID,
+		Account:        user.Account,
+		Nickname:       user.Nickname,
+		AvatarURL:      user.AvatarURL,
+		Bio:            user.Bio,
+		Status:         user.Status,
+		Role:           user.Role,
+		FollowingCount: user.FollowingCount,
+		FollowerCount:  user.FollowerCount,
+		WorkCount:      user.WorkCount,
 	}
 }

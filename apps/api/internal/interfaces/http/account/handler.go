@@ -6,6 +6,8 @@ import (
 	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -99,6 +101,23 @@ func (h *Handler) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, profileResponse(profile))
 }
 
+// Get 读取公开用户资料，用于访问他人主页。
+func (h *Handler) Get(c *gin.Context) {
+	userID, err := parsePositiveUserID(c.Param("userId"))
+	if err != nil {
+		writeProfileError(c, err)
+		return
+	}
+
+	profile, err := h.service.GetPublicProfile(c.Request.Context(), userID)
+	if err != nil {
+		writeProfileError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, publicProfileResponse(profile))
+}
+
 // UpdateMe 更新当前登录用户资料，请求体支持部分字段更新。
 func (h *Handler) UpdateMe(c *gin.Context) {
 	userID, ok := userIDFromContext(c)
@@ -122,16 +141,32 @@ func (h *Handler) UpdateMe(c *gin.Context) {
 	c.JSON(http.StatusOK, profileResponse(profile))
 }
 
+// publicProfileResponse 将应用层 Profile 转成公开 JSON 结构。
+func publicProfileResponse(profile *applicationaccount.Profile) publicUserProfileResponse {
+	return publicUserProfileResponse{
+		ID:             profile.ID,
+		Nickname:       profile.Nickname,
+		AvatarURL:      profile.AvatarURL,
+		Bio:            profile.Bio,
+		FollowingCount: profile.FollowingCount,
+		FollowerCount:  profile.FollowerCount,
+		WorkCount:      profile.WorkCount,
+	}
+}
+
 // profileResponse 将应用层 Profile 转成对外 JSON 结构。
 func profileResponse(profile *applicationaccount.Profile) userProfileResponse {
 	return userProfileResponse{
-		ID:        profile.ID,
-		Account:   profile.Account,
-		Nickname:  profile.Nickname,
-		AvatarURL: profile.AvatarURL,
-		Bio:       profile.Bio,
-		Status:    profile.Status,
-		Role:      profile.Role,
+		ID:             profile.ID,
+		Account:        profile.Account,
+		Nickname:       profile.Nickname,
+		AvatarURL:      profile.AvatarURL,
+		Bio:            profile.Bio,
+		Status:         profile.Status,
+		Role:           profile.Role,
+		FollowingCount: profile.FollowingCount,
+		FollowerCount:  profile.FollowerCount,
+		WorkCount:      profile.WorkCount,
 	}
 }
 
@@ -143,6 +178,14 @@ func userIDFromContext(c *gin.Context) (int64, bool) {
 	}
 	userID, ok := value.(int64)
 	return userID, ok && userID > 0
+}
+
+func parsePositiveUserID(raw string) (int64, error) {
+	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || value <= 0 {
+		return 0, domainaccount.ErrInvalidUserID
+	}
+	return value, nil
 }
 
 // writeProfileError 统一账号资料相关接口的错误响应。

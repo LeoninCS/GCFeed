@@ -19,19 +19,32 @@ import (
 )
 
 type accountProfileResponse struct {
-	ID        int64  `json:"id"`
-	Account   string `json:"account"`
-	Nickname  string `json:"nickname"`
-	AvatarURL string `json:"avatar_url"`
-	Bio       string `json:"bio"`
-	Status    int    `json:"status"`
-	Role      string `json:"role"`
+	ID             int64  `json:"id"`
+	Account        string `json:"account"`
+	Nickname       string `json:"nickname"`
+	AvatarURL      string `json:"avatar_url"`
+	Bio            string `json:"bio"`
+	Status         int    `json:"status"`
+	Role           string `json:"role"`
+	FollowingCount int    `json:"following_count"`
+	FollowerCount  int    `json:"follower_count"`
+	WorkCount      int    `json:"work_count"`
 }
 
 type accountTokenResponse struct {
 	AccessToken      string `json:"access_token"`
 	TokenType        string `json:"token_type"`
 	ExpiresInSeconds int64  `json:"expires_in_seconds"`
+}
+
+type publicAccountProfileResponse struct {
+	ID             int64  `json:"id"`
+	Nickname       string `json:"nickname"`
+	AvatarURL      string `json:"avatar_url"`
+	Bio            string `json:"bio"`
+	FollowingCount int    `json:"following_count"`
+	FollowerCount  int    `json:"follower_count"`
+	WorkCount      int    `json:"work_count"`
 }
 
 // memoryAccountRepo 是账号测试用的内存仓储，模拟真实 Repository 的唯一账号索引。
@@ -103,6 +116,19 @@ func (r *memoryAccountRepo) UpdateProfile(ctx context.Context, user *domainaccou
 	stored.AvatarURL = user.AvatarURL
 	stored.Bio = user.Bio
 	return nil
+}
+
+func (r *memoryAccountRepo) SetStatsForTest(userID int64, followingCount int, followerCount int, workCount int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	stored, exists := r.byID[userID]
+	if !exists {
+		return
+	}
+	stored.FollowingCount = followingCount
+	stored.FollowerCount = followerCount
+	stored.WorkCount = workCount
 }
 
 // cloneUser 返回副本，避免测试代码直接修改仓储中的内部对象。
@@ -225,6 +251,33 @@ func TestAccountAPIValidation(t *testing.T) {
 	requireStatus(t, emptyNicknameResponse, http.StatusBadRequest)
 }
 
+// TestPublicAccountProfile 覆盖公开用户主页资料中的关注数、粉丝数和作品数。
+func TestPublicAccountProfile(t *testing.T) {
+	router, repo := newAccountRouterWithRepo(t)
+
+	registerResponse := performJSONRequest(
+		router,
+		http.MethodPost,
+		"/api/users",
+		`{"account":"creator","password":"12345678","nickname":"creator name"}`,
+		"",
+	)
+	requireStatus(t, registerResponse, http.StatusCreated)
+
+	var created accountProfileResponse
+	decodeJSON(t, registerResponse, &created)
+	repo.SetStatsForTest(created.ID, 7, 11, 3)
+
+	response := performJSONRequest(router, http.MethodGet, "/api/users/1", "", "")
+	requireStatus(t, response, http.StatusOK)
+
+	var profile publicAccountProfileResponse
+	decodeJSON(t, response, &profile)
+	if profile.ID != created.ID || profile.Nickname != "creator name" || profile.FollowingCount != 7 || profile.FollowerCount != 11 || profile.WorkCount != 3 {
+		t.Fatalf("unexpected public profile response: %+v", profile)
+	}
+}
+
 // registerAndLogin 为需要登录态的测试准备可用 access token。
 func registerAndLogin(t *testing.T, router *gin.Engine) string {
 	t.Helper()
@@ -257,6 +310,11 @@ func registerAndLogin(t *testing.T, router *gin.Engine) string {
 
 // newAccountRouter 只装配账号相关路由，使测试聚焦账号模块。
 func newAccountRouter(t *testing.T) *gin.Engine {
+	router, _ := newAccountRouterWithRepo(t)
+	return router
+}
+
+func newAccountRouterWithRepo(t *testing.T) (*gin.Engine, *memoryAccountRepo) {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
@@ -281,8 +339,9 @@ func newAccountRouter(t *testing.T) *gin.Engine {
 	users.POST("", handler.Register)
 	users.GET("/me", authMiddleware, handler.Me)
 	users.PATCH("/me", authMiddleware, handler.UpdateMe)
+	users.GET("/:userId", handler.Get)
 
-	return router
+	return router, repo
 }
 
 // performJSONRequest 构造 JSON 请求，并在需要时附加 Bearer token。
