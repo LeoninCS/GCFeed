@@ -8,6 +8,7 @@ import (
 
 const (
 	RoleUser     = "user"
+	RoleAdmin    = "admin"
 	StatusNormal = 1
 )
 

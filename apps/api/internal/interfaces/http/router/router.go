@@ -3,14 +3,17 @@ package interfaceshttprouter
 import (
 	applicationaccount "GCFeed/internal/application/account"
 	applicationfeed "GCFeed/internal/application/feed"
+	applicationinteraction "GCFeed/internal/application/interaction"
 	applicationvideo "GCFeed/internal/application/video"
 	infraconfig "GCFeed/internal/infra/config"
 	infrajwt "GCFeed/internal/infra/jwt"
 	infraaccount "GCFeed/internal/infra/persistence/account"
 	infrafeed "GCFeed/internal/infra/persistence/feed"
+	infrainteraction "GCFeed/internal/infra/persistence/interaction"
 	infravideo "GCFeed/internal/infra/persistence/video"
 	interfaceshttpaccount "GCFeed/internal/interfaces/http/account"
 	interfaceshttpfeed "GCFeed/internal/interfaces/http/feed"
+	interfaceshttpinteraction "GCFeed/internal/interfaces/http/interaction"
 	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
 	interfaceshttpupload "GCFeed/internal/interfaces/http/upload"
 	interfaceshttpvideo "GCFeed/internal/interfaces/http/video"
@@ -29,7 +32,13 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 		return err
 	}
 
-	if err := gormDB.AutoMigrate(&infraaccount.UserModel{}, &infravideo.VideoModel{}, &infravideo.VideoStatModel{}); err != nil {
+	if err := gormDB.AutoMigrate(
+		&infraaccount.UserModel{},
+		&infravideo.VideoModel{},
+		&infravideo.VideoStatModel{},
+		&infrainteraction.ActionModel{},
+		&infrainteraction.CommentModel{},
+	); err != nil {
 		return err
 	}
 	if err := infravideo.EnsureStats(gormDB); err != nil {
@@ -50,6 +59,9 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	feedRepo := infrafeed.New(gormDB)
 	feedService := applicationfeed.NewService(feedRepo)
 	feedHandler := interfaceshttpfeed.NewHandler(feedService)
+	interactionRepo := infrainteraction.New(gormDB)
+	interactionService := applicationinteraction.NewService(interactionRepo)
+	interactionHandler := interfaceshttpinteraction.NewHandler(interactionService)
 	uploadHandler := interfaceshttpupload.NewHandler("./uploads")
 
 	g.GET("/health", HealthCheck)
@@ -81,6 +93,13 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	feed := api.Group("/feed")
 	feed.GET("/timeline", feedHandler.Timeline)
 	feed.GET("/refresh", feedHandler.Refresh)
+
+	interactions := api.Group("/interactions")
+	interactions.POST("/likes/toggle", authMiddleware, interactionHandler.ToggleLike)
+	interactions.POST("/favorites/toggle", authMiddleware, interactionHandler.ToggleFavorite)
+	interactions.POST("/comments", authMiddleware, interactionHandler.CreateComment)
+	interactions.GET("/comments", interactionHandler.ListComments)
+	interactions.DELETE("/comments/:commentId", authMiddleware, interactionHandler.DeleteComment)
 
 	return nil
 }

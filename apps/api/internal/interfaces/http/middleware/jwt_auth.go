@@ -9,6 +9,7 @@ import (
 )
 
 const ContextUserIDKey = "auth_user_id"
+const ContextRoleKey = "auth_role"
 
 func NewJWTAuth(jwtManager *infrajwt.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -44,6 +45,7 @@ func NewJWTAuth(jwtManager *infrajwt.Manager) gin.HandlerFunc {
 		}
 
 		c.Set(ContextUserIDKey, claims.UserID)
+		c.Set(ContextRoleKey, claims.Role)
 		c.Next()
 	}
 }
