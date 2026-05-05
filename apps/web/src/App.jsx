@@ -334,7 +334,7 @@ function FeedPage({ session, onNavigate }) {
     let live = true;
     setFeedState("loading");
     setFeedError("");
-    apiRequest("/api/feed-items?limit=12", { token: session.token })
+    apiRequest("/api/feed-items?limit=10", { token: session.token })
       .then((data) => {
         if (!live) return;
         setSwipe(null);

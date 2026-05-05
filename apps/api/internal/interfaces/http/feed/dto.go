@@ -2,8 +2,17 @@ package interfaceshttpfeed
 
 import "time"
 
+// feedQueryRequest 是复杂 Feed 查询入口的请求体。
+type feedQueryRequest struct {
+	Scene         string            `json:"scene"`
+	Cursor        string            `json:"cursor"`
+	Limit         *int              `json:"limit"`
+	ClientContext map[string]string `json:"context"`
+}
+
 // timelineFeedResponse 是 Feed 游标分页响应。
 type timelineFeedResponse struct {
+	Scene      string             `json:"scene"`
 	Items      []feedItemResponse `json:"items"`
 	NextCursor string             `json:"next_cursor"`
 	HasMore    bool               `json:"has_more"`

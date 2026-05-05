@@ -16,6 +16,7 @@ import (
 )
 
 type feedAPIResponse struct {
+	Scene      string                `json:"scene"`
 	Items      []feedItemAPIResponse `json:"items"`
 	NextCursor string                `json:"next_cursor"`
 	HasMore    bool                  `json:"has_more"`
@@ -80,6 +81,9 @@ func TestFeedAPIFlow(t *testing.T) {
 
 	var firstPage feedAPIResponse
 	decodeJSON(t, firstPageResponse, &firstPage)
+	if firstPage.Scene != string(domainfeed.SceneTimeline) {
+		t.Fatalf("unexpected feed scene: %+v", firstPage)
+	}
 	if len(firstPage.Items) != 2 || firstPage.Items[0].VideoID != 3 || firstPage.Items[1].VideoID != 2 {
 		t.Fatalf("unexpected first page response: %+v", firstPage)
 	}
@@ -109,6 +113,38 @@ func TestFeedAPIFlow(t *testing.T) {
 	}
 }
 
+// TestFeedSceneQuery 覆盖 scene 参数和复杂查询入口。
+func TestFeedSceneQuery(t *testing.T) {
+	router := newFeedRouter(seedFeedItems())
+
+	sceneResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=timeline&limit=1", "", "")
+	requireStatus(t, sceneResponse, http.StatusOK)
+
+	var sceneFeed feedAPIResponse
+	decodeJSON(t, sceneResponse, &sceneFeed)
+	if sceneFeed.Scene != string(domainfeed.SceneTimeline) || len(sceneFeed.Items) != 1 || sceneFeed.Items[0].VideoID != 3 {
+		t.Fatalf("unexpected scene response: %+v", sceneFeed)
+	}
+
+	queryResponse := performJSONRequest(
+		router,
+		http.MethodPost,
+		"/api/feed-queries",
+		`{"scene":"timeline","limit":2,"context":{"device":"ios","experiment":"rank_v1"}}`,
+		"",
+	)
+	requireStatus(t, queryResponse, http.StatusOK)
+
+	var queryFeed feedAPIResponse
+	decodeJSON(t, queryResponse, &queryFeed)
+	if queryFeed.Scene != string(domainfeed.SceneTimeline) || len(queryFeed.Items) != 2 {
+		t.Fatalf("unexpected query response: %+v", queryFeed)
+	}
+
+	unknownSceneResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=following&limit=1", "", "")
+	requireStatus(t, unknownSceneResponse, http.StatusBadRequest)
+}
+
 // TestFeedAPIValidation 覆盖 limit 和 cursor 参数校验。
 func TestFeedAPIValidation(t *testing.T) {
 	router := newFeedRouter(seedFeedItems())
@@ -131,6 +167,7 @@ func newFeedRouter(items []*domainfeed.FeedItem) *gin.Engine {
 
 	api := router.Group("/api")
 	api.GET("/feed-items", handler.Timeline)
+	api.POST("/feed-queries", handler.Query)
 
 	return router
 }

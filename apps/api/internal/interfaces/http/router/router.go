@@ -82,6 +82,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	g.Static("/uploads", "./uploads")
 
 	authMiddleware := interfaceshttpmiddleware.NewJWTAuth(jwtManager)
+	optionalAuthMiddleware := interfaceshttpmiddleware.NewOptionalJWTAuth(jwtManager)
 	api := g.Group("/api")
 
 	// RESTful 路由约定：路径表达资源，HTTP 方法表达动作。
@@ -119,7 +120,8 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	uploads.POST("", uploadHandler.Create)
 
 	// Feed 暴露为条目集合，客户端通过游标和 limit 控制分页。
-	api.GET("/feed-items", feedHandler.Timeline)
+	api.GET("/feed-items", optionalAuthMiddleware, feedHandler.Timeline)
+	api.POST("/feed-queries", optionalAuthMiddleware, feedHandler.Query)
 	// 删除评论只需要评论自身 ID，所以放在顶层 comments 资源下。
 	api.DELETE("/comments/:commentId", authMiddleware, interactionHandler.DeleteComment)
 

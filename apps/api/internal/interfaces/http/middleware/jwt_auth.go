@@ -52,3 +52,28 @@ func NewJWTAuth(jwtManager *infrajwt.Manager) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// NewOptionalJWTAuth 在公共接口中补充可选登录身份，适合 Feed 个性化场景。
+func NewOptionalJWTAuth(jwtManager *infrajwt.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := strings.TrimSpace(c.GetHeader("Authorization"))
+		if header == "" {
+			c.Next()
+			return
+		}
+
+		parts := strings.SplitN(header, " ", 2)
+		if len(parts) != 2 || !strings.EqualFold(strings.TrimSpace(parts[0]), "Bearer") {
+			c.Next()
+			return
+		}
+
+		token := strings.TrimSpace(parts[1])
+		claims, err := jwtManager.ParseAndValidateToken(token, infrajwt.TokenTypeAccess)
+		if err == nil {
+			c.Set(ContextUserIDKey, claims.UserID)
+			c.Set(ContextRoleKey, claims.Role)
+		}
+		c.Next()
+	}
+}
