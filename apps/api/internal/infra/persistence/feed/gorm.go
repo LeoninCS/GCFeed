@@ -38,6 +38,23 @@ func New(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// EnsureTimelineIndex 创建 timeline 回源查询所需索引。
+func EnsureTimelineIndex(db *gorm.DB) error {
+	var count int64
+	err := db.Raw(
+		"SELECT COUNT(1) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?",
+		"video",
+		"idx_video_timeline",
+	).Scan(&count).Error
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	return db.Exec("CREATE INDEX idx_video_timeline ON video (status, published_at DESC, id DESC)").Error
+}
+
 // ListTimelineFeed 查询时间线 Feed，视频、作者和统计数据在这里一次性拼好。
 func (r *Repository) ListTimelineFeed(ctx context.Context, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedItem, error) {
 	var models []timelineFeedVideoModel

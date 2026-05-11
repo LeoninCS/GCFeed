@@ -39,18 +39,35 @@ type feedItemAPIResponse struct {
 
 // memoryFeedRepo 是 Feed 测试用内存仓储，模拟时间线排序和游标分页。
 type memoryFeedRepo struct {
+	mu            sync.Mutex
+	items         []*domainfeed.FeedItem
+	timelineCalls int
+}
+
+type memoryFeedCache struct {
 	mu    sync.Mutex
-	items []*domainfeed.FeedItem
+	items map[string]*applicationfeed.FeedResult
 }
 
 func newMemoryFeedRepo(items []*domainfeed.FeedItem) *memoryFeedRepo {
 	return &memoryFeedRepo{items: items}
 }
 
+func newMemoryFeedCache() *memoryFeedCache {
+	return &memoryFeedCache{items: map[string]*applicationfeed.FeedResult{}}
+}
+
+func (r *memoryFeedRepo) TimelineCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.timelineCalls
+}
+
 // ListTimelineFeed 模拟真实仓储的 published_at DESC, video_id DESC 排序。
 func (r *memoryFeedRepo) ListTimelineFeed(ctx context.Context, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.timelineCalls++
 
 	items := make([]*domainfeed.FeedItem, 0, len(r.items))
 	for _, item := range r.items {
@@ -70,6 +87,22 @@ func (r *memoryFeedRepo) ListTimelineFeed(ctx context.Context, cursor *domainfee
 		limit = len(items)
 	}
 	return items[:limit], nil
+}
+
+func (c *memoryFeedCache) Get(ctx context.Context, key string) (*applicationfeed.FeedResult, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	result, ok := c.items[key]
+	return result, ok, nil
+}
+
+func (c *memoryFeedCache) Set(ctx context.Context, key string, result *applicationfeed.FeedResult, ttl time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.items[key] = result
+	return nil
 }
 
 // ListHotFeed 模拟真实仓储的 hot_score DESC, published_at DESC, video_id DESC 排序。
@@ -204,6 +237,31 @@ func TestHotFeedScene(t *testing.T) {
 	}
 }
 
+// TestTimelineFeedCache 覆盖 timeline Feed 缓存命中。
+func TestTimelineFeedCache(t *testing.T) {
+	repo := newMemoryFeedRepo(seedFeedItems())
+	cache := newMemoryFeedCache()
+	router := newFeedRouterWithService(applicationfeed.New(repo, applicationfeed.WithTimelineCache(cache)))
+
+	firstResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=timeline&limit=2", "", "")
+	requireStatus(t, firstResponse, http.StatusOK)
+	if repo.TimelineCalls() != 1 {
+		t.Fatalf("unexpected timeline repo calls after first request: %d", repo.TimelineCalls())
+	}
+
+	secondResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=timeline&limit=2", "", "")
+	requireStatus(t, secondResponse, http.StatusOK)
+	if repo.TimelineCalls() != 1 {
+		t.Fatalf("unexpected timeline repo calls after cached request: %d", repo.TimelineCalls())
+	}
+
+	var secondPage feedAPIResponse
+	decodeJSON(t, secondResponse, &secondPage)
+	if len(secondPage.Items) != 2 || secondPage.Items[0].VideoID != 3 || secondPage.Items[1].VideoID != 2 {
+		t.Fatalf("unexpected cached timeline response: %+v", secondPage)
+	}
+}
+
 // TestFeedAPIValidation 覆盖 limit 和 cursor 参数校验。
 func TestFeedAPIValidation(t *testing.T) {
 	router := newFeedRouter(seedFeedItems())
@@ -217,11 +275,13 @@ func TestFeedAPIValidation(t *testing.T) {
 
 // newFeedRouter 只装配 Feed 路由，测试时无需数据库。
 func newFeedRouter(items []*domainfeed.FeedItem) *gin.Engine {
+	return newFeedRouterWithService(applicationfeed.New(newMemoryFeedRepo(items)))
+}
+
+func newFeedRouterWithService(service *applicationfeed.Service) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 
-	repo := newMemoryFeedRepo(items)
-	service := applicationfeed.New(repo)
 	handler := interfaceshttpfeed.New(service)
 
 	api := router.Group("/api")

@@ -9,4 +9,8 @@ database:
   user: "root"
   password: "sealos123"
   name: "GCFeed"
-  
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0

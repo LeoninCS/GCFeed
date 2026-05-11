@@ -5,6 +5,7 @@ type Config struct {
 	Port     int            `yaml:"port"`
 	JWT      JWTConfig      `yaml:"jwt"`
 	Database DatabaseConfig `yaml:"database"`
+	Redis    RedisConfig    `yaml:"redis"`
 }
 
 // JWTConfig 保存 JWT 签名密钥和访问 token 有效期。
@@ -20,4 +21,11 @@ type DatabaseConfig struct {
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
 	Name     string `yaml:"name"`
+}
+
+// RedisConfig 保存 Redis 连接参数，用于 Feed 读缓存。
+type RedisConfig struct {
+	Addr     string `yaml:"addr"`
+	Password string `yaml:"password"`
+	DB       int    `yaml:"db"`
 }

@@ -6,6 +6,7 @@ import (
 	applicationinteraction "GCFeed/internal/application/interaction"
 	applicationrelation "GCFeed/internal/application/relation"
 	applicationvideo "GCFeed/internal/application/video"
+	infracache "GCFeed/internal/infra/cache"
 	infraconfig "GCFeed/internal/infra/config"
 	infrajwt "GCFeed/internal/infra/jwt"
 	infraaccount "GCFeed/internal/infra/persistence/account"
@@ -52,6 +53,9 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	if err := infravideo.EnsureStats(gormDB); err != nil {
 		return err
 	}
+	if err := infrafeed.EnsureTimelineIndex(gormDB); err != nil {
+		return err
+	}
 
 	// JWT Manager 同时被账号服务用于签发 token，也被鉴权中间件用于校验 token。
 	jwtManager, err := infrajwt.NewManager(cfg.JWT.Secret, cfg.JWT.AccessTTL)
@@ -67,7 +71,12 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	videoService := applicationvideo.New(videoRepo)
 	videoHandler := interfaceshttpvideo.New(videoService)
 	feedRepo := infrafeed.New(gormDB)
-	feedService := applicationfeed.New(feedRepo)
+	feedOptions := []applicationfeed.Option{}
+	if cfg.Redis.Addr != "" {
+		redisClient := infracache.NewRedisClient(cfg.Redis)
+		feedOptions = append(feedOptions, applicationfeed.WithTimelineCache(infracache.NewFeedCache(redisClient)))
+	}
+	feedService := applicationfeed.New(feedRepo, feedOptions...)
 	feedHandler := interfaceshttpfeed.New(feedService)
 	interactionRepo := infrainteraction.New(gormDB)
 	interactionService := applicationinteraction.New(interactionRepo)

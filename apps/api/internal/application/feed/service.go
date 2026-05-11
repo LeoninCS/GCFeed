@@ -3,14 +3,22 @@ package applicationfeed
 import (
 	domainfeed "GCFeed/internal/domain/feed"
 	"context"
+	"crypto/sha1"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"hash/fnv"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const defaultFeedLimit = 10
+const timelineFirstPageCacheTTL = 5 * time.Second
+const timelinePageCacheTTL = 45 * time.Second
 
 var ErrLoadFeedFailed = errors.New("failed to load feed")
 
@@ -40,6 +48,12 @@ type FeedResult struct {
 	HasMore    bool
 }
 
+// FeedCache 定义 Feed 结果缓存能力，Redis 实现在基础设施层提供。
+type FeedCache interface {
+	Get(ctx context.Context, key string) (*FeedResult, bool, error)
+	Set(ctx context.Context, key string, result *FeedResult, ttl time.Duration) error
+}
+
 // TimelineFeedResult 兼容原有时间线用例命名。
 type TimelineFeedResult = FeedResult
 
@@ -51,8 +65,12 @@ type Strategy interface {
 
 // TimelineStrategy 复用现有时间线查询能力。
 type TimelineStrategy struct {
-	scene domainfeed.Scene
-	repo  domainfeed.Repository
+	scene        domainfeed.Scene
+	repo         domainfeed.Repository
+	cache        FeedCache
+	firstPageTTL time.Duration
+	pageTTL      time.Duration
+	group        singleflight.Group
 }
 
 // HotStrategy 使用互动热度读取热榜 Feed。
@@ -75,6 +93,16 @@ type hotCursorPayload struct {
 func WithStrategy(strategy Strategy) Option {
 	return func(s *Service) {
 		s.RegisterStrategy(strategy)
+	}
+}
+
+// WithTimelineCache 为时间线 Feed 启用读缓存。
+func WithTimelineCache(cache FeedCache) Option {
+	return func(s *Service) {
+		strategy, ok := s.strategies[domainfeed.SceneTimeline].(*TimelineStrategy)
+		if ok {
+			strategy.cache = cache
+		}
 	}
 }
 
@@ -127,8 +155,10 @@ func (s *Service) GetTimelineFeed(ctx context.Context, cursor string, limit int)
 // NewTimelineStrategy 创建一个时间线排序策略，可作为 latest 等场景的基础实现。
 func NewTimelineStrategy(scene domainfeed.Scene, repo domainfeed.Repository) *TimelineStrategy {
 	return &TimelineStrategy{
-		scene: domainfeed.NormalizeScene(scene),
-		repo:  repo,
+		scene:        domainfeed.NormalizeScene(scene),
+		repo:         repo,
+		firstPageTTL: timelineFirstPageCacheTTL,
+		pageTTL:      timelinePageCacheTTL,
 	}
 }
 
@@ -144,7 +174,37 @@ func (s *TimelineStrategy) List(ctx context.Context, req FeedRequest) (*FeedResu
 		return nil, err
 	}
 	limit := normalizeLimit(req.Limit)
+	if s.cache == nil {
+		return s.listFromRepo(ctx, parsedCursor, limit)
+	}
 
+	cacheKey := timelineCacheKey(req.Cursor, limit)
+	if result, ok, err := s.cache.Get(ctx, cacheKey); err == nil && ok {
+		return result, nil
+	}
+
+	value, err, _ := s.group.Do(cacheKey, func() (any, error) {
+		if result, ok, err := s.cache.Get(ctx, cacheKey); err == nil && ok {
+			return result, nil
+		}
+		result, err := s.listFromRepo(ctx, parsedCursor, limit)
+		if err != nil {
+			return nil, err
+		}
+		_ = s.cache.Set(ctx, cacheKey, result, timelineCacheTTL(req.Cursor, cacheKey, s.firstPageTTL, s.pageTTL))
+		return result, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	result, ok := value.(*FeedResult)
+	if !ok {
+		return nil, ErrLoadFeedFailed
+	}
+	return result, nil
+}
+
+func (s *TimelineStrategy) listFromRepo(ctx context.Context, parsedCursor *domainfeed.TimelineCursor, limit int) (*FeedResult, error) {
 	items, err := s.repo.ListTimelineFeed(ctx, parsedCursor, limit+1)
 	if err != nil {
 		return nil, ErrLoadFeedFailed
@@ -233,6 +293,31 @@ func normalizeLimit(limit int) int {
 		return domainfeed.MaxLimit
 	}
 	return limit
+}
+
+func timelineCacheKey(cursor string, limit int) string {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return fmt.Sprintf("feed:timeline:v1:limit:%d:first", limit)
+	}
+
+	sum := sha1.Sum([]byte(cursor))
+	return fmt.Sprintf("feed:timeline:v1:limit:%d:cursor:%s", limit, hex.EncodeToString(sum[:]))
+}
+
+func timelineCacheTTL(cursor string, cacheKey string, firstPageTTL time.Duration, pageTTL time.Duration) time.Duration {
+	ttl := pageTTL
+	if strings.TrimSpace(cursor) == "" {
+		ttl = firstPageTTL
+	}
+	if ttl <= 0 {
+		return 0
+	}
+
+	hasher := fnv.New32a()
+	_, _ = hasher.Write([]byte(cacheKey))
+	jitterPercent := 10 + int(hasher.Sum32()%11)
+	return ttl + time.Duration(jitterPercent)*ttl/100
 }
 
 // parseTimelineCursor 将客户端传回的字符串游标解析成领域游标。
