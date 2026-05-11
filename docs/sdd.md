@@ -26,7 +26,7 @@ apps/api/
   internal/
     domain/{module}/                       # 领域模型、错误、仓储接口
     application/{module}/                  # 应用服务和用例结果对象
-    infra/{config,database,httpgin,jwt}/   # 基础设施能力
+    infra/{cache,config,database,httpgin,jwt}/ # 基础设施能力
     infra/persistence/{module}/            # GORM 模型和仓储实现
     interfaces/http/{module}/              # HTTP Handler 和 DTO
     interfaces/http/router/router.go       # 路由和依赖装配
@@ -259,7 +259,7 @@ Infrastructure 层负责技术实现。
 - 行锁。
 - 唯一键冲突识别。
 - 数据库模型到领域对象的转换。
-- JWT、配置、数据库连接和 Gin 初始化。
+- Redis 客户端、缓存实现、JWT、配置、数据库连接和 Gin 初始化。
 
 GORM 模型规范：
 
@@ -760,6 +760,26 @@ npm run build
 ```bash
 ./scripts/start.sh
 ```
+
+Docker Compose 启动：
+
+```bash
+cd apps
+docker compose up --build
+```
+
+Compose 配置放在 `apps/docker-compose.yml`，用于编排 `mysql`、`redis`、`api`、`web` 四个服务。API 容器使用 `apps/api/configs/config.docker.yaml` 覆盖运行配置，连接 `mysql:3306` 和 `redis:6379`；Web 容器通过 Nginx 暴露静态资源，并把 `/api/` 与 `/uploads/` 转发到 API 服务。
+
+容器端口约定：
+
+| 服务 | 本机端口 | 容器端口 |
+| --- | --- | --- |
+| Web | `5173` | `80` |
+| API | `8080` | `8080` |
+| MySQL | `3307` | `3306` |
+| Redis | `6379` | `6379` |
+
+前后端镜像分别使用 `apps/api/Dockerfile` 和 `apps/web/Dockerfile` 构建。生产 Web 容器的上传体积限制与后端上传限制保持一致，Nginx `client_max_body_size` 设置为 `1024m`。
 
 ## 11. 路由装配规范
 
