@@ -20,6 +20,76 @@
 - ✅ React + Vite Web 客户端
 - ✅ Web 生产构建
 
+## 启动流程
+
+### Docker Compose 启动
+
+前置依赖：
+
+- Docker
+- Docker Compose
+
+在项目根目录执行：
+
+```bash
+cd apps
+docker compose up --build
+```
+
+服务启动后访问：
+
+| 服务 | 地址 |
+| --- | --- |
+| Web | `http://127.0.0.1:5173` |
+| API 健康检查 | `http://127.0.0.1:8080/health` |
+| MySQL | `127.0.0.1:3307` |
+| Redis | `127.0.0.1:6379` |
+
+Compose 会启动 `mysql`、`redis`、`api`、`web` 四个服务。API 容器使用 `apps/api/configs/config.docker.yaml`，数据库地址为 `mysql:3306`，Redis 地址为 `redis:6379`。
+
+后台启动：
+
+```bash
+cd apps
+docker compose up -d --build
+```
+
+查看日志：
+
+```bash
+cd apps
+docker compose logs -f api web
+```
+
+停止服务：
+
+```bash
+cd apps
+docker compose down
+```
+
+清理数据库、Redis 和上传文件数据卷：
+
+```bash
+cd apps
+docker compose down -v
+```
+
+### 本地开发启动
+
+本地开发脚本会分别启动 Go API 和 Vite Web：
+
+```bash
+./scripts/start.sh
+```
+
+默认地址：
+
+| 服务 | 地址 |
+| --- | --- |
+| Web | `http://127.0.0.1:5173` |
+| API | `http://127.0.0.1:8080` |
+
 ## 业务模块范围
 
 - 用户域：账户、关系、消息
