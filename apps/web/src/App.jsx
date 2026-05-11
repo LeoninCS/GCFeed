@@ -4,6 +4,10 @@ const TOKEN_KEY = "gcfeed.accessToken";
 const USER_KEY = "gcfeed.user";
 const PUBLIC_PROFILE_KEY = "gcfeed.publicProfiles";
 const FEED_TRANSITION_MS = 320;
+const FEED_SCENES = [
+  { key: "timeline", label: "时间线", icon: "schedule" },
+  { key: "hot", label: "热榜", icon: "local_fire_department" }
+];
 
 const image = {
   currentUser:
@@ -309,6 +313,7 @@ function TopNav({ user, authenticated, onNavigate, onLogout }) {
 }
 
 function FeedPage({ session, onNavigate }) {
+  const [feedScene, setFeedScene] = useState(FEED_SCENES[0].key);
   const [items, setItems] = useState([]);
   const [index, setIndex] = useState(0);
   const [liked, setLiked] = useState({});
@@ -329,17 +334,19 @@ function FeedPage({ session, onNavigate }) {
   const feedMainRef = useRef(null);
   const dragRef = useRef(null);
   const swipeRef = useRef(null);
+  const currentFeedScene = FEED_SCENES.find((scene) => scene.key === feedScene) || FEED_SCENES[0];
 
   const loadFeed = useCallback(() => {
     let live = true;
     setFeedState("loading");
     setFeedError("");
-    apiRequest("/api/feed-items?limit=10", { token: session.token })
+    apiRequest(`/api/feed-items?scene=${encodeURIComponent(feedScene)}&limit=10`, { token: session.token })
       .then((data) => {
         if (!live) return;
         setSwipe(null);
         setItems((data.items || []).map(mapFeedItem));
         setIndex(0);
+        setCommentsOpen(false);
         setFeedState("ready");
       })
       .catch((error) => {
@@ -351,7 +358,7 @@ function FeedPage({ session, onNavigate }) {
     return () => {
       live = false;
     };
-  }, [session.token]);
+  }, [feedScene, session.token]);
 
   useEffect(() => {
     if (!session.token) {
@@ -726,12 +733,25 @@ function FeedPage({ session, onNavigate }) {
         onPointerUp={handlePointerEnd}
         onPointerCancel={handlePointerEnd}
       >
-        {feedState === "loading" && <FeedMessage icon="hourglass_top" title="正在加载 Feed" />}
+        <div className="feed-scene-tabs" aria-label="Feed 场景">
+          {FEED_SCENES.map((scene) => (
+            <button
+              className={scene.key === feedScene ? "active" : ""}
+              key={scene.key}
+              type="button"
+              onClick={() => setFeedScene(scene.key)}
+            >
+              <span className="material-symbols-outlined">{scene.icon}</span>
+              <span>{scene.label}</span>
+            </button>
+          ))}
+        </div>
+        {feedState === "loading" && <FeedMessage icon="hourglass_top" title={`正在加载${currentFeedScene.label}`} />}
         {feedState === "error" && (
           <FeedMessage icon="sync_problem" title={feedError} action="重新加载" onAction={loadFeed} />
         )}
         {feedState === "ready" && items.length === 0 && (
-          <FeedMessage icon="video_library" title="Feed 暂无视频" action="刷新" onAction={loadFeed} />
+          <FeedMessage icon="video_library" title={`${currentFeedScene.label}暂无视频`} action="刷新" onAction={loadFeed} />
         )}
         {visibleCurrent && (
           <div className={`feed-stage-wrap ${swipe ? `swiping ${swipe.direction} ${swipe.settling ? "settling" : "dragging"}` : ""}`}>
