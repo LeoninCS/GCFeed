@@ -5,8 +5,8 @@ const USER_KEY = "gcfeed.user";
 const PUBLIC_PROFILE_KEY = "gcfeed.publicProfiles";
 const FEED_TRANSITION_MS = 320;
 const FEED_SCENES = [
-  { key: "timeline", label: "时间线", icon: "schedule" },
-  { key: "hot", label: "热榜", icon: "local_fire_department" }
+  { key: "timeline", label: "最新视频", route: "/timeline", icon: "home" },
+  { key: "hot", label: "热门榜单", route: "/hotfeed", icon: "local_fire_department" }
 ];
 
 const image = {
@@ -47,10 +47,10 @@ function App() {
 
   useEffect(() => {
     if (route === "/") {
-      navigate("/feed", setRoute);
+      navigate("/timeline", setRoute);
     }
     if ((route === "/profile" || route === "/me") && !(token && user)) {
-      navigate("/feed", setRoute);
+      navigate("/timeline", setRoute);
     }
   }, [route, token, user]);
 
@@ -86,6 +86,7 @@ function App() {
     return (
       <AppShell
         user={user}
+        route={route}
         authenticated={Boolean(token && user)}
         onNavigate={(path) => navigate(path, setRoute)}
         onLogout={() => logout(session, setRoute)}
@@ -100,6 +101,7 @@ function App() {
     return (
       <AppShell
         user={user}
+        route={route}
         authenticated={Boolean(token && user)}
         onNavigate={(path) => navigate(path, setRoute)}
         onLogout={() => logout(session, setRoute)}
@@ -113,6 +115,7 @@ function App() {
     return (
       <AppShell
         user={user}
+        route={route}
         authenticated={Boolean(token && user)}
         onNavigate={(path) => navigate(path, setRoute)}
         onLogout={() => logout(session, setRoute)}
@@ -125,11 +128,12 @@ function App() {
   return (
     <AppShell
       user={user}
+      route={route}
       authenticated={Boolean(token && user)}
       onNavigate={(path) => navigate(path, setRoute)}
       onLogout={() => logout(session, setRoute)}
     >
-      <FeedPage session={session} onNavigate={(path) => navigate(path, setRoute)} />
+      <FeedPage feedScene={feedSceneFromRoute(route)} session={session} onNavigate={(path) => navigate(path, setRoute)} />
     </AppShell>
   );
 }
@@ -165,7 +169,7 @@ function LoginPage({ session, onNavigate }) {
       const accessToken = tokenResponse.access_token;
       const profile = await apiRequest("/api/users/me", { token: accessToken });
       session.setAuth(accessToken, profile);
-      onNavigate("/feed");
+      onNavigate("/timeline");
     } catch (error) {
       setMessage(error.message || "登录失败，请检查账号与密码");
     } finally {
@@ -248,17 +252,23 @@ function LoginPage({ session, onNavigate }) {
   );
 }
 
-function AppShell({ children, user, authenticated, onNavigate, onLogout }) {
+function AppShell({ children, user, route, authenticated, onNavigate, onLogout }) {
   const displayUser = user || emptyProfile;
   return (
     <div className="app-shell">
       <TopNav user={displayUser} authenticated={authenticated} onNavigate={onNavigate} onLogout={onLogout} />
       <div className="app-body">
         <aside className="sidebar">
-          <button className="sidebar-link active" onClick={() => onNavigate("/feed")}>
-            <span className="material-symbols-outlined filled">home</span>
-            <span>Feed</span>
-          </button>
+          {FEED_SCENES.map((scene) => (
+            <button
+              className={`sidebar-link ${route === scene.route ? "active" : ""}`}
+              key={scene.key}
+              onClick={() => onNavigate(scene.route)}
+            >
+              <span className="material-symbols-outlined filled">{scene.icon}</span>
+              <span>{scene.label}</span>
+            </button>
+          ))}
         </aside>
         {children}
       </div>
@@ -270,7 +280,7 @@ function TopNav({ user, authenticated, onNavigate, onLogout }) {
   return (
     <header className="top-nav">
       <div className="top-left">
-        <button className="wordmark" onClick={() => onNavigate("/feed")}>
+        <button className="wordmark" onClick={() => onNavigate("/timeline")}>
           GCFeed
         </button>
       </div>
@@ -312,8 +322,7 @@ function TopNav({ user, authenticated, onNavigate, onLogout }) {
   );
 }
 
-function FeedPage({ session, onNavigate }) {
-  const [feedScene, setFeedScene] = useState(FEED_SCENES[0].key);
+function FeedPage({ feedScene, session, onNavigate }) {
   const [items, setItems] = useState([]);
   const [index, setIndex] = useState(0);
   const [liked, setLiked] = useState({});
@@ -352,13 +361,13 @@ function FeedPage({ session, onNavigate }) {
       .catch((error) => {
         if (!live) return;
         setItems([]);
-        setFeedError(error.message || "Feed 加载失败");
+        setFeedError(error.message || `${currentFeedScene.label}加载失败`);
         setFeedState("error");
       });
     return () => {
       live = false;
     };
-  }, [feedScene, session.token]);
+  }, [currentFeedScene.label, feedScene, session.token]);
 
   useEffect(() => {
     if (!session.token) {
@@ -733,19 +742,6 @@ function FeedPage({ session, onNavigate }) {
         onPointerUp={handlePointerEnd}
         onPointerCancel={handlePointerEnd}
       >
-        <div className="feed-scene-tabs" aria-label="Feed 场景">
-          {FEED_SCENES.map((scene) => (
-            <button
-              className={scene.key === feedScene ? "active" : ""}
-              key={scene.key}
-              type="button"
-              onClick={() => setFeedScene(scene.key)}
-            >
-              <span className="material-symbols-outlined">{scene.icon}</span>
-              <span>{scene.label}</span>
-            </button>
-          ))}
-        </div>
         {feedState === "loading" && <FeedMessage icon="hourglass_top" title={`正在加载${currentFeedScene.label}`} />}
         {feedState === "error" && (
           <FeedMessage icon="sync_problem" title={feedError} action="重新加载" onAction={loadFeed} />
@@ -1246,9 +1242,9 @@ function ProfilePage({ session, onNavigate }) {
         <section className="profile-card works-card">
           <header>
             <h2>我的作品</h2>
-            <button className="ghost-button compact" onClick={() => onNavigate("/feed")}>
+            <button className="ghost-button compact" onClick={() => onNavigate("/timeline")}>
               <span className="material-symbols-outlined">home</span>
-              Feed
+              最新视频
             </button>
           </header>
           <VideoGrid videos={videos} state={videosState} onSelect={setSelectedWork} />
@@ -1404,9 +1400,9 @@ function PublicProfilePage({ userID, onNavigate }) {
               作品
             </button>
           </div>
-          <button className="ghost-button compact public-back-button" type="button" onClick={() => onNavigate("/feed")}>
+          <button className="ghost-button compact public-back-button" type="button" onClick={() => onNavigate("/timeline")}>
             <span className="material-symbols-outlined">home</span>
-            Feed
+            最新视频
           </button>
         </div>
       </section>
@@ -1681,9 +1677,9 @@ function UploadPage({ session, onNavigate }) {
             <p className="eyebrow">发布</p>
             <h1>发布视频</h1>
           </div>
-          <button className="ghost-button compact" onClick={() => onNavigate("/feed")}>
+          <button className="ghost-button compact" onClick={() => onNavigate("/timeline")}>
             <span className="material-symbols-outlined">home</span>
-            Feed
+            最新视频
           </button>
         </header>
 
@@ -1752,10 +1748,16 @@ function UploadPage({ session, onNavigate }) {
 
 function normalizeRoute(pathname) {
   if (pathname === "/login") return "/auth";
+  if (pathname === "/feed") return "/timeline";
   if (pathname === "/me") return "/profile";
   if (/^\/users\/\d+$/.test(pathname)) return pathname;
-  if (["/", "/auth", "/feed", "/profile", "/upload"].includes(pathname)) return pathname;
-  return "/feed";
+  if (["/", "/auth", "/timeline", "/hotfeed", "/profile", "/upload"].includes(pathname)) return pathname;
+  return "/timeline";
+}
+
+function feedSceneFromRoute(route) {
+  const scene = FEED_SCENES.find((item) => item.route === route);
+  return scene?.key || FEED_SCENES[0].key;
 }
 
 function navigate(path, setRoute) {
@@ -1772,7 +1774,7 @@ function logout(session, setRoute) {
     }).catch(() => {});
   }
   session.clearAuth();
-  navigate("/feed", setRoute);
+  navigate("/timeline", setRoute);
 }
 
 function readStoredUser() {

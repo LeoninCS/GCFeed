@@ -481,6 +481,9 @@ textarea:focus {
 
 .sidebar {
   z-index: 40;
+  display: grid;
+  align-content: start;
+  gap: 8px;
   width: var(--sidebar);
   height: 100%;
   flex: 0 0 var(--sidebar);
@@ -534,48 +537,6 @@ textarea:focus {
   justify-content: center;
   padding: 0;
   overflow: hidden;
-}
-
-.feed-scene-tabs {
-  position: absolute;
-  z-index: 16;
-  top: 22px;
-  left: 24px;
-  display: inline-flex;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(19, 19, 21, 0.72);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
-  backdrop-filter: blur(18px);
-}
-
-.feed-scene-tabs button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 13px;
-  color: rgba(255, 255, 255, 0.72);
-  border-radius: 999px;
-  background: transparent;
-  font-size: 13px;
-  font-weight: 900;
-  transition: color 140ms ease, background 140ms ease, transform 140ms ease;
-}
-
-.feed-scene-tabs button.active {
-  color: #001b3e;
-  background: var(--primary);
-}
-
-.feed-scene-tabs button:active {
-  transform: scale(0.97);
-}
-
-.feed-scene-tabs .material-symbols-outlined {
-  font-size: 18px;
 }
 
 .feed-stage-wrap {
@@ -1892,6 +1853,7 @@ textarea:focus {
     bottom: 0;
     left: 0;
     top: auto;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
     height: 64px;
     flex-basis: auto;
@@ -1902,7 +1864,9 @@ textarea:focus {
 
   .sidebar-link {
     justify-content: center;
+    gap: 8px;
     min-height: 48px;
+    padding: 0 10px;
   }
 
   .app-body {
