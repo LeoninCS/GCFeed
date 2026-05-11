@@ -86,3 +86,27 @@
 ## 3. 数据表设计（最小实现）
 
 Feed 依赖已有 `video` 和 `video_stat` 表读取已上线视频与互动计数。
+
+推荐索引：
+
+```sql
+CREATE INDEX idx_video_timeline ON video (status, published_at DESC, id DESC);
+```
+
+## 4. Timeline 访问优化
+
+`scene=timeline` 启用 Redis 读缓存：
+
+| 缓存项 | TTL |
+| --- | --- |
+| 首页 | 5 秒 + 抖动 |
+| 后续页 | 45 秒 + 抖动 |
+
+缓存 key：
+
+```text
+feed:timeline:v1:limit:{limit}:first
+feed:timeline:v1:limit:{limit}:cursor:{cursorHash}
+```
+
+缓存未命中时使用 singleflight 合并同 key 回源请求，缓存读取或写入异常时回源 MySQL。
