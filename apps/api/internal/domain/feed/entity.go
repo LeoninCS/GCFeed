@@ -32,11 +32,19 @@ type FeedItem struct {
 	LikeCount       int
 	CommentCount    int
 	FavoriteCount   int
+	HotScore        int
 	PublishedAt     time.Time
 }
 
 // TimelineCursor 保存时间线分页所需的排序字段。
 type TimelineCursor struct {
+	PublishedAt time.Time
+	VideoID     int64
+}
+
+// HotCursor 保存热榜分页所需的排序字段。
+type HotCursor struct {
+	HotScore    int
 	PublishedAt time.Time
 	VideoID     int64
 }
@@ -64,6 +72,12 @@ func RestoreFeedItem(videoID int64, authorID int64, authorNickname string, autho
 		LikeCount:       likeCount,
 		CommentCount:    commentCount,
 		FavoriteCount:   favoriteCount,
+		HotScore:        ScoreHotFeedItem(likeCount, commentCount, favoriteCount),
 		PublishedAt:     publishedAt,
 	}
+}
+
+// ScoreHotFeedItem 计算热榜排序分：评论权重最高，收藏次之，点赞提供基础热度。
+func ScoreHotFeedItem(likeCount int, commentCount int, favoriteCount int) int {
+	return likeCount*3 + commentCount*5 + favoriteCount*4
 }

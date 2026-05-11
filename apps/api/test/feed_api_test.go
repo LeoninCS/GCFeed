@@ -72,6 +72,36 @@ func (r *memoryFeedRepo) ListTimelineFeed(ctx context.Context, cursor *domainfee
 	return items[:limit], nil
 }
 
+// ListHotFeed 模拟真实仓储的 hot_score DESC, published_at DESC, video_id DESC 排序。
+func (r *memoryFeedRepo) ListHotFeed(ctx context.Context, cursor *domainfeed.HotCursor, limit int) ([]*domainfeed.FeedItem, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	items := make([]*domainfeed.FeedItem, 0, len(r.items))
+	for _, item := range r.items {
+		if cursor == nil ||
+			item.HotScore < cursor.HotScore ||
+			(item.HotScore == cursor.HotScore && item.PublishedAt.Before(cursor.PublishedAt)) ||
+			(item.HotScore == cursor.HotScore && item.PublishedAt.Equal(cursor.PublishedAt) && item.VideoID < cursor.VideoID) {
+			items = append(items, cloneFeedItem(item))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].HotScore == items[j].HotScore {
+			if items[i].PublishedAt.Equal(items[j].PublishedAt) {
+				return items[i].VideoID > items[j].VideoID
+			}
+			return items[i].PublishedAt.After(items[j].PublishedAt)
+		}
+		return items[i].HotScore > items[j].HotScore
+	})
+
+	if limit > len(items) {
+		limit = len(items)
+	}
+	return items[:limit], nil
+}
+
 // TestFeedAPIFlow 覆盖 Feed 首页、下一页游标和刷新读取。
 func TestFeedAPIFlow(t *testing.T) {
 	router := newFeedRouter(seedFeedItems())
@@ -145,6 +175,35 @@ func TestFeedSceneQuery(t *testing.T) {
 	requireStatus(t, unknownSceneResponse, http.StatusBadRequest)
 }
 
+// TestHotFeedScene 覆盖热榜 Feed 排序和游标分页。
+func TestHotFeedScene(t *testing.T) {
+	router := newFeedRouter(seedHotFeedItems())
+
+	firstPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=hot&limit=2", "", "")
+	requireStatus(t, firstPageResponse, http.StatusOK)
+
+	var firstPage feedAPIResponse
+	decodeJSON(t, firstPageResponse, &firstPage)
+	if firstPage.Scene != string(domainfeed.SceneHot) {
+		t.Fatalf("unexpected hot feed scene: %+v", firstPage)
+	}
+	if len(firstPage.Items) != 2 || firstPage.Items[0].VideoID != 1 || firstPage.Items[1].VideoID != 2 {
+		t.Fatalf("unexpected hot first page response: %+v", firstPage)
+	}
+	if firstPage.NextCursor == "" || !firstPage.HasMore {
+		t.Fatalf("unexpected hot first page cursor: %+v", firstPage)
+	}
+
+	secondPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=hot&cursor="+firstPage.NextCursor+"&limit=2", "", "")
+	requireStatus(t, secondPageResponse, http.StatusOK)
+
+	var secondPage feedAPIResponse
+	decodeJSON(t, secondPageResponse, &secondPage)
+	if len(secondPage.Items) != 1 || secondPage.Items[0].VideoID != 3 || secondPage.HasMore {
+		t.Fatalf("unexpected hot second page response: %+v", secondPage)
+	}
+}
+
 // TestFeedAPIValidation 覆盖 limit 和 cursor 参数校验。
 func TestFeedAPIValidation(t *testing.T) {
 	router := newFeedRouter(seedFeedItems())
@@ -179,6 +238,16 @@ func seedFeedItems() []*domainfeed.FeedItem {
 		domainfeed.RestoreFeedItem(1, 10, "old author", "https://example.com/avatar-1.jpg", "old video", "old description", "https://example.com/1.mp4", "https://example.com/1.jpg", 1, 2, 3, base.Add(-2*time.Hour)),
 		domainfeed.RestoreFeedItem(2, 20, "middle author", "https://example.com/avatar-2.jpg", "middle video", "middle description", "https://example.com/2.mp4", "https://example.com/2.jpg", 4, 5, 6, base.Add(-1*time.Hour)),
 		domainfeed.RestoreFeedItem(3, 30, "new author", "https://example.com/avatar-3.jpg", "new video", "new description", "https://example.com/3.mp4", "https://example.com/3.jpg", 7, 8, 9, base),
+	}
+}
+
+// seedHotFeedItems 准备热度和发布时间错开的数据，用于验证热榜排序。
+func seedHotFeedItems() []*domainfeed.FeedItem {
+	base := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	return []*domainfeed.FeedItem{
+		domainfeed.RestoreFeedItem(1, 10, "old author", "https://example.com/avatar-1.jpg", "old hot video", "old hot description", "https://example.com/1.mp4", "https://example.com/1.jpg", 20, 30, 10, base.Add(-2*time.Hour)),
+		domainfeed.RestoreFeedItem(2, 20, "middle author", "https://example.com/avatar-2.jpg", "middle warm video", "middle warm description", "https://example.com/2.mp4", "https://example.com/2.jpg", 10, 1, 0, base.Add(-1*time.Hour)),
+		domainfeed.RestoreFeedItem(3, 30, "new author", "https://example.com/avatar-3.jpg", "new quiet video", "new quiet description", "https://example.com/3.mp4", "https://example.com/3.jpg", 0, 0, 0, base),
 	}
 }
 

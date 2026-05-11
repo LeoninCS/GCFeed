@@ -6,4 +6,6 @@ import "context"
 type Repository interface {
 	// ListTimelineFeed 按发布时间倒序读取 Feed，cursor 为空时读取第一页。
 	ListTimelineFeed(ctx context.Context, cursor *TimelineCursor, limit int) ([]*FeedItem, error)
+	// ListHotFeed 按热度分倒序读取 Feed，cursor 为空时读取第一页。
+	ListHotFeed(ctx context.Context, cursor *HotCursor, limit int) ([]*FeedItem, error)
 }

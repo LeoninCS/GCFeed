@@ -55,7 +55,18 @@ type TimelineStrategy struct {
 	repo  domainfeed.Repository
 }
 
+// HotStrategy 使用互动热度读取热榜 Feed。
+type HotStrategy struct {
+	repo domainfeed.Repository
+}
+
 type timelineCursorPayload struct {
+	PublishedAt string `json:"published_at"`
+	VideoID     int64  `json:"video_id"`
+}
+
+type hotCursorPayload struct {
+	HotScore    int    `json:"hot_score"`
 	PublishedAt string `json:"published_at"`
 	VideoID     int64  `json:"video_id"`
 }
@@ -74,6 +85,7 @@ func New(repo domainfeed.Repository, options ...Option) *Service {
 		defaultScene: domainfeed.DefaultScene,
 	}
 	service.RegisterStrategy(NewTimelineStrategy(domainfeed.SceneTimeline, repo))
+	service.RegisterStrategy(NewHotStrategy(repo))
 	for _, option := range options {
 		option(service)
 	}
@@ -161,6 +173,52 @@ func (s *TimelineStrategy) List(ctx context.Context, req FeedRequest) (*FeedResu
 	}, nil
 }
 
+// NewHotStrategy 创建热榜排序策略。
+func NewHotStrategy(repo domainfeed.Repository) *HotStrategy {
+	return &HotStrategy{repo: repo}
+}
+
+// Scene 返回热榜场景。
+func (s *HotStrategy) Scene() domainfeed.Scene {
+	return domainfeed.SceneHot
+}
+
+// List 使用热度分、发布时间和视频 ID 读取热榜 Feed。
+func (s *HotStrategy) List(ctx context.Context, req FeedRequest) (*FeedResult, error) {
+	parsedCursor, err := parseHotCursor(req.Cursor)
+	if err != nil {
+		return nil, err
+	}
+	limit := normalizeLimit(req.Limit)
+
+	items, err := s.repo.ListHotFeed(ctx, parsedCursor, limit+1)
+	if err != nil {
+		return nil, ErrLoadFeedFailed
+	}
+
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+
+	nextCursor := ""
+	if len(items) > 0 {
+		last := items[len(items)-1]
+		nextCursor = encodeHotCursor(&domainfeed.HotCursor{
+			HotScore:    last.HotScore,
+			PublishedAt: last.PublishedAt,
+			VideoID:     last.VideoID,
+		})
+	}
+
+	return &FeedResult{
+		Scene:      domainfeed.SceneHot,
+		Items:      items,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
+}
+
 // RefreshTimelineFeed 从第一页重新加载 Feed，适合下拉刷新场景。
 func (s *Service) RefreshTimelineFeed(ctx context.Context, limit int) (*TimelineFeedResult, error) {
 	return s.GetTimelineFeed(ctx, "", limit)
@@ -208,6 +266,38 @@ func parseTimelineCursor(raw string) (*domainfeed.TimelineCursor, error) {
 	}, nil
 }
 
+// parseHotCursor 将客户端传回的热榜游标解析成领域游标。
+func parseHotCursor(raw string) (*domainfeed.HotCursor, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+
+	content, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		content, err = base64.StdEncoding.DecodeString(raw)
+		if err != nil {
+			return nil, domainfeed.ErrInvalidCursor
+		}
+	}
+
+	var payload hotCursorPayload
+	if err := json.Unmarshal(content, &payload); err != nil {
+		return nil, domainfeed.ErrInvalidCursor
+	}
+
+	publishedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(payload.PublishedAt))
+	if err != nil || payload.VideoID <= 0 {
+		return nil, domainfeed.ErrInvalidCursor
+	}
+
+	return &domainfeed.HotCursor{
+		HotScore:    payload.HotScore,
+		PublishedAt: publishedAt,
+		VideoID:     payload.VideoID,
+	}, nil
+}
+
 // encodeTimelineCursor 把排序字段编码成 URL 安全的游标字符串。
 func encodeTimelineCursor(cursor *domainfeed.TimelineCursor) string {
 	if cursor == nil || cursor.VideoID <= 0 || cursor.PublishedAt.IsZero() {
@@ -215,6 +305,23 @@ func encodeTimelineCursor(cursor *domainfeed.TimelineCursor) string {
 	}
 
 	content, err := json.Marshal(timelineCursorPayload{
+		PublishedAt: cursor.PublishedAt.UTC().Format(time.RFC3339Nano),
+		VideoID:     cursor.VideoID,
+	})
+	if err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(content)
+}
+
+// encodeHotCursor 把热榜排序字段编码成 URL 安全的游标字符串。
+func encodeHotCursor(cursor *domainfeed.HotCursor) string {
+	if cursor == nil || cursor.VideoID <= 0 || cursor.PublishedAt.IsZero() {
+		return ""
+	}
+
+	content, err := json.Marshal(hotCursorPayload{
+		HotScore:    cursor.HotScore,
 		PublishedAt: cursor.PublishedAt.UTC().Format(time.RFC3339Nano),
 		VideoID:     cursor.VideoID,
 	})
