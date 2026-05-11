@@ -1,0 +1,16 @@
+port: 8080
+jwt:
+  secret: "replace-with-strong-secret"
+  access_ttl: "15m"
+
+database:
+  host: "mysql"
+  port: 3306
+  user: "root"
+  password: "sealos123"
+  name: "GCFeed"
+
+redis:
+  addr: "redis:6379"
+  password: ""
+  db: 0
