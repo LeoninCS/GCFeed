@@ -75,6 +75,12 @@ type memoryInteractionRepo struct {
 	commentIdem   map[string]int64
 }
 
+type memoryHotScoreRecorder struct {
+	mu     sync.Mutex
+	scores map[int64]int
+	events []int
+}
+
 func newMemoryInteractionRepo() *memoryInteractionRepo {
 	return &memoryInteractionRepo{
 		nextActionID:  1,
@@ -91,19 +97,19 @@ func newMemoryInteractionRepo() *memoryInteractionRepo {
 }
 
 // SetAction 模拟点赞/收藏状态变更，并维护对应计数。
-func (r *memoryInteractionRepo) SetAction(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*domaininteraction.Action, int, error) {
+func (r *memoryInteractionRepo) SetAction(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*domaininteraction.Action, int, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if !r.videoPublished(videoID) {
-		return nil, 0, domaininteraction.ErrVideoNotFound
+		return nil, 0, 0, domaininteraction.ErrVideoNotFound
 	}
 
 	key := memoryInteractionActionKey(userID, videoID, actionType)
 	action, exists := r.actions[key]
 	if exists && idempotencyKey != "" && action.IdempotencyKey == strings.TrimSpace(idempotencyKey) {
 		// 幂等键命中时直接返回当前状态和计数，模拟真实仓储重放逻辑。
-		return cloneInteractionAction(action), r.actionCount(videoID, actionType), nil
+		return cloneInteractionAction(action), r.actionCount(videoID, actionType), 0, nil
 	}
 
 	nextStatus := domaininteraction.ActionStatusCanceled
@@ -111,6 +117,7 @@ func (r *memoryInteractionRepo) SetAction(ctx context.Context, userID int64, vid
 		nextStatus = domaininteraction.ActionStatusActive
 	}
 
+	delta := 0
 	if !exists {
 		action = &domaininteraction.Action{
 			ID:             r.nextActionID,
@@ -125,37 +132,40 @@ func (r *memoryInteractionRepo) SetAction(ctx context.Context, userID int64, vid
 		r.nextActionID++
 		r.actions[key] = action
 		if active {
+			delta = 1
 			r.addActionCount(videoID, actionType, 1)
 		}
-		return cloneInteractionAction(action), r.actionCount(videoID, actionType), nil
+		return cloneInteractionAction(action), r.actionCount(videoID, actionType), delta, nil
 	}
 
 	if action.Status != nextStatus {
 		if active {
+			delta = 1
 			r.addActionCount(videoID, actionType, 1)
 		} else {
+			delta = -1
 			r.addActionCount(videoID, actionType, -1)
 		}
 	}
 	action.Status = nextStatus
 	action.IdempotencyKey = strings.TrimSpace(idempotencyKey)
 	action.UpdatedAt = time.Now()
-	return cloneInteractionAction(action), r.actionCount(videoID, actionType), nil
+	return cloneInteractionAction(action), r.actionCount(videoID, actionType), delta, nil
 }
 
 // CreateComment 模拟评论创建，并维护视频评论数和评论幂等索引。
-func (r *memoryInteractionRepo) CreateComment(ctx context.Context, comment *domaininteraction.Comment) (*domaininteraction.Comment, int, error) {
+func (r *memoryInteractionRepo) CreateComment(ctx context.Context, comment *domaininteraction.Comment) (*domaininteraction.Comment, int, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if !r.videoPublished(comment.VideoID) {
-		return nil, 0, domaininteraction.ErrVideoNotFound
+		return nil, 0, 0, domaininteraction.ErrVideoNotFound
 	}
 	if comment.IdempotencyKey != "" {
 		key := memoryInteractionCommentIdemKey(comment.UserID, comment.IdempotencyKey)
 		if id, exists := r.commentIdem[key]; exists {
 			existing := r.comments[id]
-			return cloneInteractionComment(existing), r.stats[existing.VideoID].CommentCount, nil
+			return cloneInteractionComment(existing), r.stats[existing.VideoID].CommentCount, 0, nil
 		}
 	}
 
@@ -173,7 +183,7 @@ func (r *memoryInteractionRepo) CreateComment(ctx context.Context, comment *doma
 	stat := r.stats[comment.VideoID]
 	stat.CommentCount++
 	r.stats[comment.VideoID] = stat
-	return cloneInteractionComment(comment), stat.CommentCount, nil
+	return cloneInteractionComment(comment), stat.CommentCount, 1, nil
 }
 
 // FindCommentByUserAndIdempotencyKey 模拟评论创建接口的幂等查询。
@@ -217,28 +227,30 @@ func (r *memoryInteractionRepo) ListComments(ctx context.Context, videoID int64,
 }
 
 // DeleteComment 模拟评论软删除，以及评论作者、视频作者、管理员三种删除权限。
-func (r *memoryInteractionRepo) DeleteComment(ctx context.Context, commentID int64, userID int64, role string) (*domaininteraction.Comment, int, error) {
+func (r *memoryInteractionRepo) DeleteComment(ctx context.Context, commentID int64, userID int64, role string) (*domaininteraction.Comment, int, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	comment, exists := r.comments[commentID]
 	if !exists {
-		return nil, 0, domaininteraction.ErrCommentNotFound
+		return nil, 0, 0, domaininteraction.ErrCommentNotFound
 	}
 	video := r.videos[comment.VideoID]
 	if comment.UserID != userID && video.AuthorID != userID && role != domainaccount.RoleAdmin {
-		return nil, 0, domaininteraction.ErrCommentPermissionDenied
+		return nil, 0, 0, domaininteraction.ErrCommentPermissionDenied
 	}
+	delta := 0
 	if comment.Status != domaininteraction.CommentStatusDeleted {
 		comment.Status = domaininteraction.CommentStatusDeleted
 		comment.UpdatedAt = time.Now()
+		delta = -1
 		stat := r.stats[comment.VideoID]
 		if stat.CommentCount > 0 {
 			stat.CommentCount--
 		}
 		r.stats[comment.VideoID] = stat
 	}
-	return cloneInteractionComment(comment), r.stats[comment.VideoID].CommentCount, nil
+	return cloneInteractionComment(comment), r.stats[comment.VideoID].CommentCount, delta, nil
 }
 
 // TestInteractionActionFlow 覆盖点赞、幂等重放、取消点赞和收藏。
@@ -353,6 +365,43 @@ func TestInteractionValidation(t *testing.T) {
 	requireStatus(t, badList, http.StatusBadRequest)
 }
 
+// TestInteractionHotScoreRecorder 覆盖真实互动变化写入热榜增量。
+func TestInteractionHotScoreRecorder(t *testing.T) {
+	repo := newMemoryInteractionRepo()
+	recorder := newMemoryHotScoreRecorder()
+	service := applicationinteraction.New(repo, applicationinteraction.WithHotScoreRecorder(recorder))
+
+	if _, err := service.Like(context.Background(), 42, 1001, "like-1"); err != nil {
+		t.Fatalf("like: %v", err)
+	}
+	if _, err := service.Like(context.Background(), 42, 1001, "like-1"); err != nil {
+		t.Fatalf("like replay: %v", err)
+	}
+	if _, err := service.Favorite(context.Background(), 42, 1001, "favorite-1"); err != nil {
+		t.Fatalf("favorite: %v", err)
+	}
+	if _, err := service.Unlike(context.Background(), 42, 1001, "like-2"); err != nil {
+		t.Fatalf("unlike: %v", err)
+	}
+	created, err := service.CreateComment(context.Background(), 77, 1001, "hot comment", "comment-1")
+	if err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if _, err := service.CreateComment(context.Background(), 77, 1001, "hot comment replay", "comment-1"); err != nil {
+		t.Fatalf("comment replay: %v", err)
+	}
+	if _, err := service.DeleteComment(context.Background(), created.Comment.ID, 77, domainaccount.RoleUser); err != nil {
+		t.Fatalf("delete comment: %v", err)
+	}
+
+	if recorder.Score(1001) != 4 {
+		t.Fatalf("unexpected hot score: %d", recorder.Score(1001))
+	}
+	if recorder.EventCount() != 5 {
+		t.Fatalf("unexpected hot event count: %d", recorder.EventCount())
+	}
+}
+
 // newInteractionRouter 只装配互动相关 RESTful 路由。
 func newInteractionRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	t.Helper()
@@ -458,6 +507,34 @@ func clampMemoryCount(value int) int {
 		return 0
 	}
 	return value
+}
+
+func newMemoryHotScoreRecorder() *memoryHotScoreRecorder {
+	return &memoryHotScoreRecorder{
+		scores: map[int64]int{},
+		events: []int{},
+	}
+}
+
+func (r *memoryHotScoreRecorder) AddHotScore(ctx context.Context, videoID int64, scoreDelta int, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.scores[videoID] += scoreDelta
+	r.events = append(r.events, scoreDelta)
+	return nil
+}
+
+func (r *memoryHotScoreRecorder) Score(videoID int64) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.scores[videoID]
+}
+
+func (r *memoryHotScoreRecorder) EventCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.events)
 }
 
 var _ domaininteraction.Repository = (*memoryInteractionRepo)(nil)

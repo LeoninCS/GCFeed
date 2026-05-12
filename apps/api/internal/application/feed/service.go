@@ -19,8 +19,6 @@ import (
 const defaultFeedLimit = 10
 const timelineFirstPageCacheTTL = 5 * time.Second
 const timelinePageCacheTTL = 45 * time.Second
-const hotFirstPageCacheTTL = 10 * time.Second
-const hotPageCacheTTL = 30 * time.Second
 const feedCardCacheTTL = 15 * time.Minute
 const feedStatCacheTTL = 15 * time.Second
 
@@ -68,6 +66,7 @@ type FeedCache interface {
 	SetCards(ctx context.Context, cards map[int64]*domainfeed.FeedCard, ttl time.Duration) error
 	GetStats(ctx context.Context, videoIDs []int64) (map[int64]*domainfeed.FeedStat, error)
 	SetStats(ctx context.Context, stats map[int64]*domainfeed.FeedStat, ttl time.Duration) error
+	ListHotWindowPage(ctx context.Context, windowEnd time.Time, offset int, limit int) ([]*domainfeed.FeedPageItem, error)
 }
 
 // TimelineFeedResult 兼容原有时间线用例命名。
@@ -91,11 +90,8 @@ type TimelineStrategy struct {
 
 // HotStrategy 使用互动热度读取热榜 Feed。
 type HotStrategy struct {
-	repo         domainfeed.Repository
-	cache        FeedCache
-	firstPageTTL time.Duration
-	pageTTL      time.Duration
-	group        singleflight.Group
+	repo  domainfeed.Repository
+	cache FeedCache
 }
 
 type timelineCursorPayload struct {
@@ -107,6 +103,8 @@ type hotCursorPayload struct {
 	HotScore    int    `json:"hot_score"`
 	PublishedAt string `json:"published_at"`
 	VideoID     int64  `json:"video_id"`
+	WindowEnd   string `json:"window_end,omitempty"`
+	Offset      int    `json:"offset,omitempty"`
 }
 
 // WithStrategy 注册一个额外 Feed 策略。
@@ -260,11 +258,7 @@ func (s *TimelineStrategy) listPageFromRepo(ctx context.Context, parsedCursor *d
 
 // NewHotStrategy 创建热榜排序策略。
 func NewHotStrategy(repo domainfeed.Repository) *HotStrategy {
-	return &HotStrategy{
-		repo:         repo,
-		firstPageTTL: hotFirstPageCacheTTL,
-		pageTTL:      hotPageCacheTTL,
-	}
+	return &HotStrategy{repo: repo}
 }
 
 // Scene 返回热榜场景。
@@ -272,7 +266,7 @@ func (s *HotStrategy) Scene() domainfeed.Scene {
 	return domainfeed.SceneHot
 }
 
-// List 使用热度分、发布时间和视频 ID 读取热榜 Feed。
+// List 读取热榜；Redis 场景使用最近一小时分钟桶，基础场景使用仓储累计热度。
 func (s *HotStrategy) List(ctx context.Context, req FeedRequest) (*FeedResult, error) {
 	parsedCursor, err := parseHotCursor(req.Cursor)
 	if err != nil {
@@ -280,9 +274,15 @@ func (s *HotStrategy) List(ctx context.Context, req FeedRequest) (*FeedResult, e
 	}
 	limit := normalizeLimit(req.Limit)
 
-	page, err := loadFeedPage(ctx, s.cache, domainfeed.SceneHot, req.Cursor, limit, s.firstPageTTL, s.pageTTL, &s.group, func() (*FeedPage, error) {
-		return s.listPageFromRepo(ctx, parsedCursor, limit)
-	})
+	var page *FeedPage
+	if s.cache != nil {
+		if strings.TrimSpace(req.Cursor) != "" && (parsedCursor == nil || parsedCursor.WindowEnd.IsZero()) {
+			return nil, domainfeed.ErrInvalidCursor
+		}
+		page, err = s.listPageFromHotWindow(ctx, parsedCursor, limit)
+	} else {
+		page, err = s.listPageFromRepo(ctx, parsedCursor, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -296,6 +296,40 @@ func (s *HotStrategy) List(ctx context.Context, req FeedRequest) (*FeedResult, e
 		Items:      items,
 		NextCursor: page.NextCursor,
 		HasMore:    page.HasMore,
+	}, nil
+}
+
+func (s *HotStrategy) listPageFromHotWindow(ctx context.Context, parsedCursor *domainfeed.HotCursor, limit int) (*FeedPage, error) {
+	windowEnd := time.Now().UTC().Truncate(time.Minute)
+	offset := 0
+	if parsedCursor != nil && !parsedCursor.WindowEnd.IsZero() {
+		windowEnd = parsedCursor.WindowEnd.UTC().Truncate(time.Minute)
+		offset = parsedCursor.Offset
+	}
+
+	items, err := s.cache.ListHotWindowPage(ctx, windowEnd, offset, limit+1)
+	if err != nil {
+		return nil, ErrLoadFeedFailed
+	}
+
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+
+	nextCursor := ""
+	if len(items) > 0 {
+		nextCursor = encodeHotWindowCursor(&domainfeed.HotCursor{
+			WindowEnd: windowEnd,
+			Offset:    offset + len(items),
+		})
+	}
+
+	return &FeedPage{
+		Scene:      domainfeed.SceneHot,
+		Items:      items,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
 	}, nil
 }
 
@@ -429,6 +463,10 @@ func assembleFeedItems(ctx context.Context, repo domainfeed.Repository, cache Fe
 		if stat == nil {
 			stat = &domainfeed.FeedStat{VideoID: pageItem.VideoID}
 		}
+		publishedAt := pageItem.PublishedAt
+		if publishedAt.IsZero() {
+			publishedAt = card.PublishedAt
+		}
 		item := domainfeed.RestoreFeedItem(
 			card.VideoID,
 			card.AuthorID,
@@ -441,7 +479,7 @@ func assembleFeedItems(ctx context.Context, repo domainfeed.Repository, cache Fe
 			stat.LikeCount,
 			stat.CommentCount,
 			stat.FavoriteCount,
-			pageItem.PublishedAt,
+			publishedAt,
 		)
 		item.HotScore = pageItem.HotScore
 		items = append(items, item)
@@ -578,6 +616,17 @@ func parseHotCursor(raw string) (*domainfeed.HotCursor, error) {
 		return nil, domainfeed.ErrInvalidCursor
 	}
 
+	if strings.TrimSpace(payload.WindowEnd) != "" {
+		windowEnd, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(payload.WindowEnd))
+		if err != nil || payload.Offset < 0 {
+			return nil, domainfeed.ErrInvalidCursor
+		}
+		return &domainfeed.HotCursor{
+			WindowEnd: windowEnd,
+			Offset:    payload.Offset,
+		}, nil
+	}
+
 	publishedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(payload.PublishedAt))
 	if err != nil || payload.VideoID <= 0 {
 		return nil, domainfeed.ErrInvalidCursor
@@ -599,6 +648,22 @@ func encodeTimelineCursor(cursor *domainfeed.TimelineCursor) string {
 	content, err := json.Marshal(timelineCursorPayload{
 		PublishedAt: cursor.PublishedAt.UTC().Format(time.RFC3339Nano),
 		VideoID:     cursor.VideoID,
+	})
+	if err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(content)
+}
+
+// encodeHotWindowCursor 把热榜滑动窗口位置编码成 URL 安全的游标字符串。
+func encodeHotWindowCursor(cursor *domainfeed.HotCursor) string {
+	if cursor == nil || cursor.WindowEnd.IsZero() || cursor.Offset < 0 {
+		return ""
+	}
+
+	content, err := json.Marshal(hotCursorPayload{
+		WindowEnd: cursor.WindowEnd.UTC().Format(time.RFC3339Nano),
+		Offset:    cursor.Offset,
 	})
 	if err != nil {
 		return ""

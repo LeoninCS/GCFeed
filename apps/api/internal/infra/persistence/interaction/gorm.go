@@ -37,15 +37,16 @@ func New(db *gorm.DB) *Repository {
 }
 
 // SetAction 写入点赞或收藏状态，并在同一事务内维护视频统计计数。
-func (r *Repository) SetAction(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*domaininteraction.Action, int, error) {
+func (r *Repository) SetAction(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*domaininteraction.Action, int, int, error) {
 	actionType, err := domaininteraction.NormalizeActionType(actionType)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 
 	var action ActionModel
 	var count int
+	var statDelta int
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 先锁定公开视频，保证互动只发生在可互动的视频上。
 		if err := lockPublishedVideo(tx, videoID); err != nil {
@@ -118,12 +119,13 @@ func (r *Repository) SetAction(ctx context.Context, userID int64, videoID int64,
 		}
 
 		count, err = updateActionStat(tx, videoID, actionType, delta)
+		statDelta = delta
 		return err
 	})
 	if err != nil {
-		return nil, 0, mapVideoError(err)
+		return nil, 0, 0, mapVideoError(err)
 	}
-	return restoreAction(action), count, nil
+	return restoreAction(action), count, statDelta, nil
 }
 
 // actionStatusFromActive 将接口目标状态转换为数据库状态枚举。
@@ -135,7 +137,7 @@ func actionStatusFromActive(active bool) int {
 }
 
 // CreateComment 创建评论，并在同一事务内增加视频评论数。
-func (r *Repository) CreateComment(ctx context.Context, comment *domaininteraction.Comment) (*domaininteraction.Comment, int, error) {
+func (r *Repository) CreateComment(ctx context.Context, comment *domaininteraction.Comment) (*domaininteraction.Comment, int, int, error) {
 	var model CommentModel
 	var count int
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -170,17 +172,17 @@ func (r *Repository) CreateComment(ctx context.Context, comment *domaininteracti
 		if errors.Is(err, domaininteraction.ErrCommentNotFound) && comment.IdempotencyKey != "" {
 			existing, existingCount, loadErr := r.FindCommentByUserAndIdempotencyKey(ctx, comment.UserID, comment.IdempotencyKey)
 			if loadErr == nil {
-				return existing, existingCount, nil
+				return existing, existingCount, 0, nil
 			}
 		}
-		return nil, 0, mapVideoError(err)
+		return nil, 0, 0, mapVideoError(err)
 	}
 
 	created, err := r.FindCommentByID(ctx, model.ID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	return created, count, nil
+	return created, count, 1, nil
 }
 
 // FindCommentByUserAndIdempotencyKey 根据用户和幂等键查找已创建评论。
@@ -262,10 +264,11 @@ func (r *Repository) ListComments(ctx context.Context, videoID int64, cursor *do
 }
 
 // DeleteComment 软删除评论，并根据操作者身份校验删除权限。
-func (r *Repository) DeleteComment(ctx context.Context, commentID int64, userID int64, role string) (*domaininteraction.Comment, int, error) {
+func (r *Repository) DeleteComment(ctx context.Context, commentID int64, userID int64, role string) (*domaininteraction.Comment, int, int, error) {
 	role = strings.TrimSpace(role)
 	var model CommentModel
 	var count int
+	var statDelta int
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 锁定评论行，避免重复删除时并发扣减 comment_count。
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -311,17 +314,18 @@ func (r *Repository) DeleteComment(ctx context.Context, commentID int64, userID 
 			return err
 		}
 		count = nextCount
+		statDelta = -1
 		return nil
 	})
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 
 	comment, err := r.FindCommentByID(ctx, model.ID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
-	return comment, count, nil
+	return comment, count, statDelta, nil
 }
 
 // commentCount 读取视频当前评论数，用于幂等评论创建返回一致响应。

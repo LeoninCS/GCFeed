@@ -48,10 +48,11 @@ type memoryFeedRepo struct {
 }
 
 type memoryFeedCache struct {
-	mu    sync.Mutex
-	pages map[string]*applicationfeed.FeedPage
-	cards map[int64]*domainfeed.FeedCard
-	stats map[int64]*domainfeed.FeedStat
+	mu       sync.Mutex
+	pages    map[string]*applicationfeed.FeedPage
+	cards    map[int64]*domainfeed.FeedCard
+	stats    map[int64]*domainfeed.FeedStat
+	hotItems []*domainfeed.FeedPageItem
 }
 
 func newMemoryFeedRepo(items []*domainfeed.FeedItem) *memoryFeedRepo {
@@ -82,6 +83,12 @@ func (r *memoryFeedRepo) StatCalls() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.statCalls
+}
+
+func (r *memoryFeedRepo) HotCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.hotCalls
 }
 
 // ListTimelinePage 模拟真实仓储的 published_at DESC, video_id DESC 排序。
@@ -187,6 +194,31 @@ func (c *memoryFeedCache) SetStats(ctx context.Context, stats map[int64]*domainf
 		c.stats[videoID] = &cloned
 	}
 	return nil
+}
+
+func (c *memoryFeedCache) SetHotWindowItems(items []*domainfeed.FeedPageItem) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.hotItems = cloneFeedPageItems(items)
+}
+
+func (c *memoryFeedCache) ListHotWindowPage(ctx context.Context, windowEnd time.Time, offset int, limit int) ([]*domainfeed.FeedPageItem, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	items := cloneFeedPageItems(c.hotItems)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(items) || limit <= 0 {
+		return []*domainfeed.FeedPageItem{}, nil
+	}
+	end := offset + limit
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[offset:end], nil
 }
 
 // ListHotPage 模拟真实仓储的 hot_score DESC, published_at DESC, video_id DESC 排序。
@@ -352,6 +384,42 @@ func TestHotFeedScene(t *testing.T) {
 	}
 }
 
+// TestHotFeedWindowCache 覆盖热榜从 Redis 窗口页读取并继续批量组装卡片。
+func TestHotFeedWindowCache(t *testing.T) {
+	repo := newMemoryFeedRepo(seedHotFeedItems())
+	cache := newMemoryFeedCache()
+	cache.SetHotWindowItems([]*domainfeed.FeedPageItem{
+		{VideoID: 2, HotScore: 80},
+		{VideoID: 1, HotScore: 60},
+		{VideoID: 3, HotScore: 20},
+	})
+	router := newFeedRouterWithService(applicationfeed.New(repo, applicationfeed.WithFeedCache(cache)))
+
+	firstPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=hot&limit=2", "", "")
+	requireStatus(t, firstPageResponse, http.StatusOK)
+
+	var firstPage feedAPIResponse
+	decodeJSON(t, firstPageResponse, &firstPage)
+	if len(firstPage.Items) != 2 || firstPage.Items[0].VideoID != 2 || firstPage.Items[1].VideoID != 1 || !firstPage.HasMore {
+		t.Fatalf("unexpected hot window first page response: %+v", firstPage)
+	}
+	if firstPage.NextCursor == "" {
+		t.Fatalf("unexpected hot window cursor: %+v", firstPage)
+	}
+	if repo.HotCalls() != 0 {
+		t.Fatalf("unexpected hot repo calls: %d", repo.HotCalls())
+	}
+
+	secondPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=hot&cursor="+firstPage.NextCursor+"&limit=2", "", "")
+	requireStatus(t, secondPageResponse, http.StatusOK)
+
+	var secondPage feedAPIResponse
+	decodeJSON(t, secondPageResponse, &secondPage)
+	if len(secondPage.Items) != 1 || secondPage.Items[0].VideoID != 3 || secondPage.HasMore {
+		t.Fatalf("unexpected hot window second page response: %+v", secondPage)
+	}
+}
+
 // TestTimelineFeedCache 覆盖 timeline Feed 缓存命中。
 func TestTimelineFeedCache(t *testing.T) {
 	repo := newMemoryFeedRepo(seedFeedItems())
@@ -450,6 +518,7 @@ func feedCardFromFeedItem(item *domainfeed.FeedItem) *domainfeed.FeedCard {
 		Description:     item.Description,
 		MediaURL:        item.MediaURL,
 		CoverURL:        item.CoverURL,
+		PublishedAt:     item.PublishedAt,
 	}
 }
 

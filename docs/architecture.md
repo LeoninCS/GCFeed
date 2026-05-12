@@ -140,6 +140,7 @@ sequenceDiagram
   participant S as Service
   participant Repo as GORM Repository
   participant DB as MySQL
+  participant Redis as Redis
   participant FS as uploads
 
   C->>R: POST /api/users
@@ -189,6 +190,20 @@ sequenceDiagram
   Repo-->>S: 返回缺失数据
   S-->>H: 返回 items + next_cursor + has_more
   H-->>C: 返回 Timeline Feed
+
+  C->>R: PUT /api/videos/{videoId}/like
+  R->>H: Interaction.Like
+  H->>S: SetAction
+  S->>Repo: 更新互动和 video_stat
+  S->>Redis: ZINCRBY feed:hot:minute:v1:{minute}
+
+  C->>R: GET /api/feed-items?scene=hot&limit=10
+  R->>H: Feed.Timeline
+  H->>S: GetFeed(scene=hot)
+  S->>Redis: ZUNIONSTORE 最近 60 个分钟桶
+  S->>Redis: ZREVRANGE 热榜窗口
+  S-->>H: 返回一小时热榜 items + cursor
+  H-->>C: 返回 Hot Feed
 ```
 
 ## 4. 数据模型

@@ -53,6 +53,7 @@ type FeedCard struct {
 	Description     string
 	MediaURL        string
 	CoverURL        string
+	PublishedAt     time.Time
 }
 
 // FeedStat 保存视频卡片中的高频计数字段。
@@ -74,6 +75,8 @@ type HotCursor struct {
 	HotScore    int
 	PublishedAt time.Time
 	VideoID     int64
+	WindowEnd   time.Time
+	Offset      int
 }
 
 // NormalizeScene 统一 scene 参数格式，空值使用默认 Feed 场景。

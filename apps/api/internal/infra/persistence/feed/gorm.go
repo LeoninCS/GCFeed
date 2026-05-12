@@ -105,7 +105,7 @@ func (r *Repository) BatchGetFeedCards(ctx context.Context, videoIDs []int64) (m
 	var models []domainfeed.FeedCard
 	err := r.db.WithContext(ctx).
 		Table("video AS v").
-		Select("v.id AS video_id, v.author_id, a.nickname AS author_nickname, a.avatar_url AS author_avatar_url, v.title, v.description, v.media_url, v.cover_url").
+		Select("v.id AS video_id, v.author_id, a.nickname AS author_nickname, a.avatar_url AS author_avatar_url, v.title, v.description, v.media_url, v.cover_url, v.published_at").
 		Joins("LEFT JOIN account AS a ON a.id = v.author_id").
 		Where("v.id IN ? AND v.status = ? AND v.published_at IS NOT NULL", videoIDs, domainvideo.StatusPublished).
 		Scan(&models).

@@ -6,10 +6,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+const hotWindowMinutes = 60
+const hotMinuteBucketTTL = 2 * time.Hour
+const hotWindowCacheTTL = 2 * time.Minute
 
 // FeedCache 使用 Redis 保存 Feed 查询结果。
 type FeedCache struct {
@@ -137,6 +143,65 @@ func (c *FeedCache) SetStats(ctx context.Context, stats map[int64]*domainfeed.Fe
 	return nil
 }
 
+// AddHotScore 把一次互动热度写入 1 分钟粒度的热榜桶。
+func (c *FeedCache) AddHotScore(ctx context.Context, videoID int64, scoreDelta int, at time.Time) error {
+	if videoID <= 0 || scoreDelta == 0 {
+		return nil
+	}
+
+	key := hotMinuteKey(at)
+	if err := c.client.ZIncrBy(ctx, key, float64(scoreDelta), hotRankMember(videoID)).Err(); err != nil {
+		return err
+	}
+	return c.client.Expire(ctx, key, hotMinuteBucketTTL).Err()
+}
+
+// ListHotWindowPage 合并最近 60 个分钟桶，返回一小时滑动窗口内的热榜页。
+func (c *FeedCache) ListHotWindowPage(ctx context.Context, windowEnd time.Time, offset int, limit int) ([]*domainfeed.FeedPageItem, error) {
+	items := []*domainfeed.FeedPageItem{}
+	if limit <= 0 {
+		return items, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	windowEnd = windowEnd.UTC().Truncate(time.Minute)
+	windowKey := hotWindowKey(windowEnd)
+	if _, err := c.client.ZUnionStore(ctx, windowKey, &redis.ZStore{
+		Keys:      hotWindowMinuteKeys(windowEnd),
+		Aggregate: "SUM",
+	}).Result(); err != nil {
+		return nil, err
+	}
+	if err := c.client.Expire(ctx, windowKey, hotWindowCacheTTL).Err(); err != nil {
+		return nil, err
+	}
+	if err := c.client.ZRemRangeByScore(ctx, windowKey, "-inf", "0").Err(); err != nil {
+		return nil, err
+	}
+
+	values, err := c.client.ZRevRangeWithScores(ctx, windowKey, int64(offset), int64(offset+limit-1)).Result()
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		member, ok := value.Member.(string)
+		if !ok {
+			continue
+		}
+		videoID, ok := hotRankVideoID(member)
+		if !ok {
+			continue
+		}
+		items = append(items, &domainfeed.FeedPageItem{
+			VideoID:  videoID,
+			HotScore: int(value.Score),
+		})
+	}
+	return items, nil
+}
+
 func cacheKeys(videoIDs []int64, build func(int64) string) []string {
 	keys := make([]string, 0, len(videoIDs))
 	for _, videoID := range videoIDs {
@@ -151,6 +216,35 @@ func feedCardKey(videoID int64) string {
 
 func feedStatKey(videoID int64) string {
 	return fmt.Sprintf("video:stat:v1:%d", videoID)
+}
+
+func hotMinuteKey(at time.Time) string {
+	return fmt.Sprintf("feed:hot:minute:v1:%s", at.UTC().Truncate(time.Minute).Format("200601021504"))
+}
+
+func hotWindowKey(windowEnd time.Time) string {
+	return fmt.Sprintf("feed:hot:window:v1:%d", windowEnd.UTC().Truncate(time.Minute).Unix())
+}
+
+func hotWindowMinuteKeys(windowEnd time.Time) []string {
+	keys := make([]string, 0, hotWindowMinutes)
+	for index := hotWindowMinutes - 1; index >= 0; index-- {
+		keys = append(keys, hotMinuteKey(windowEnd.Add(-time.Duration(index)*time.Minute)))
+	}
+	return keys
+}
+
+func hotRankMember(videoID int64) string {
+	return fmt.Sprintf("%020d", videoID)
+}
+
+func hotRankVideoID(member string) (int64, bool) {
+	value := strings.TrimLeft(member, "0")
+	if value == "" {
+		return 0, false
+	}
+	videoID, err := strconv.ParseInt(value, 10, 64)
+	return videoID, err == nil && videoID > 0
 }
 
 func cacheValueBytes(value any) ([]byte, bool) {

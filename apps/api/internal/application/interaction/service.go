@@ -11,14 +11,25 @@ import (
 )
 
 const defaultCommentLimit = 20
+const hotScoreLikeWeight = 3
+const hotScoreFavoriteWeight = 4
+const hotScoreCommentWeight = 5
 
 var ErrLoadInteractionFailed = errors.New("failed to load interaction")
 var ErrSaveInteractionFailed = errors.New("failed to save interaction")
 var ErrUpdateInteractionFailed = errors.New("failed to update interaction")
 
 type Service struct {
-	repo domaininteraction.Repository
+	repo             domaininteraction.Repository
+	hotScoreRecorder HotScoreRecorder
 }
+
+// HotScoreRecorder 把互动变化投递到热榜分钟桶。
+type HotScoreRecorder interface {
+	AddHotScore(ctx context.Context, videoID int64, scoreDelta int, at time.Time) error
+}
+
+type Option func(*Service)
 
 type ActionResult struct {
 	VideoID       int64
@@ -50,8 +61,19 @@ type commentCursorPayload struct {
 	CommentID int64  `json:"comment_id"`
 }
 
-func New(repo domaininteraction.Repository) *Service {
-	return &Service{repo: repo}
+func New(repo domaininteraction.Repository, options ...Option) *Service {
+	service := &Service{repo: repo}
+	for _, option := range options {
+		option(service)
+	}
+	return service
+}
+
+// WithHotScoreRecorder 为互动服务启用热榜增量写入。
+func WithHotScoreRecorder(recorder HotScoreRecorder) Option {
+	return func(s *Service) {
+		s.hotScoreRecorder = recorder
+	}
 }
 
 // Like 设置用户对视频的点赞状态为有效。
@@ -97,13 +119,14 @@ func (s *Service) CreateComment(ctx context.Context, userID int64, videoID int64
 		return nil, err
 	}
 
-	created, count, err := s.repo.CreateComment(ctx, comment)
+	created, count, delta, err := s.repo.CreateComment(ctx, comment)
 	if err != nil {
 		if errors.Is(err, domaininteraction.ErrVideoNotFound) {
 			return nil, domaininteraction.ErrVideoNotFound
 		}
 		return nil, ErrSaveInteractionFailed
 	}
+	s.recordHotScore(ctx, created.VideoID, delta*hotScoreCommentWeight)
 
 	return &CreateCommentResult{Comment: created, CommentCount: count}, nil
 }
@@ -155,7 +178,7 @@ func (s *Service) DeleteComment(ctx context.Context, commentID int64, userID int
 		return nil, domaininteraction.ErrInvalidUserID
 	}
 
-	comment, count, err := s.repo.DeleteComment(ctx, commentID, userID, role)
+	comment, count, delta, err := s.repo.DeleteComment(ctx, commentID, userID, role)
 	if err != nil {
 		if errors.Is(err, domaininteraction.ErrCommentNotFound) ||
 			errors.Is(err, domaininteraction.ErrCommentPermissionDenied) {
@@ -163,6 +186,7 @@ func (s *Service) DeleteComment(ctx context.Context, commentID int64, userID int
 		}
 		return nil, ErrUpdateInteractionFailed
 	}
+	s.recordHotScore(ctx, comment.VideoID, delta*hotScoreCommentWeight)
 
 	return &DeleteCommentResult{
 		CommentID:    comment.ID,
@@ -189,7 +213,7 @@ func (s *Service) setAction(ctx context.Context, userID int64, videoID int64, ac
 	}
 
 	// active 由 HTTP 方法决定：PUT 表示生效，DELETE 表示取消。
-	action, count, err := s.repo.SetAction(ctx, userID, videoID, actionType, active, idempotencyKey)
+	action, count, delta, err := s.repo.SetAction(ctx, userID, videoID, actionType, active, idempotencyKey)
 	if err != nil {
 		if errors.Is(err, domaininteraction.ErrVideoNotFound) {
 			return nil, domaininteraction.ErrVideoNotFound
@@ -204,10 +228,19 @@ func (s *Service) setAction(ctx context.Context, userID int64, videoID int64, ac
 	}
 	if action.ActionType == domaininteraction.ActionTypeLike {
 		result.LikeCount = count
+		s.recordHotScore(ctx, action.VideoID, delta*hotScoreLikeWeight)
 	} else {
 		result.FavoriteCount = count
+		s.recordHotScore(ctx, action.VideoID, delta*hotScoreFavoriteWeight)
 	}
 	return result, nil
+}
+
+func (s *Service) recordHotScore(ctx context.Context, videoID int64, scoreDelta int) {
+	if s.hotScoreRecorder == nil || scoreDelta == 0 {
+		return
+	}
+	_ = s.hotScoreRecorder.AddHotScore(ctx, videoID, scoreDelta, time.Now())
 }
 
 // normalizeCommentLimit 统一评论分页默认值和最大值。

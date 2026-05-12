@@ -72,14 +72,17 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	videoHandler := interfaceshttpvideo.New(videoService)
 	feedRepo := infrafeed.New(gormDB)
 	feedOptions := []applicationfeed.Option{}
+	interactionOptions := []applicationinteraction.Option{}
 	if cfg.Redis.Addr != "" {
 		redisClient := infracache.NewRedisClient(cfg.Redis)
-		feedOptions = append(feedOptions, applicationfeed.WithFeedCache(infracache.NewFeedCache(redisClient)))
+		feedCache := infracache.NewFeedCache(redisClient)
+		feedOptions = append(feedOptions, applicationfeed.WithFeedCache(feedCache))
+		interactionOptions = append(interactionOptions, applicationinteraction.WithHotScoreRecorder(feedCache))
 	}
 	feedService := applicationfeed.New(feedRepo, feedOptions...)
 	feedHandler := interfaceshttpfeed.New(feedService)
 	interactionRepo := infrainteraction.New(gormDB)
-	interactionService := applicationinteraction.New(interactionRepo)
+	interactionService := applicationinteraction.New(interactionRepo, interactionOptions...)
 	interactionHandler := interfaceshttpinteraction.New(interactionService)
 	relationRepo := infrarelation.New(gormDB)
 	relationService := applicationrelation.New(relationRepo)

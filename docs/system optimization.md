@@ -227,6 +227,8 @@ Feed Service 先查询 `video_id` 列表，再批量获取卡片和计数。
 | --- | --- | --- | --- |
 | `video:card:v1:{video_id}` | 标题、封面、播放地址、作者昵称、作者头像、状态版本 | 15 分钟 | 视频或作者变更后失效 |
 | `video:stat:v1:{video_id}` | 点赞数、评论数、收藏数、播放数 | 15 秒 | Redis 写入，异步同步 DB |
+| `feed:hot:minute:v1:{yyyyMMddHHmm}` | 单分钟互动热度 ZSET | 2 小时 | 互动写入时 ZINCRBY |
+| `feed:hot:window:v1:{windowEndUnix}` | 最近 60 分钟热榜临时 ZSET | 2 分钟 | 读取时 ZUNIONSTORE |
 | `user:profile:{user_id}` | 昵称、头像、简介 | 5 分钟到 30 分钟 | 用户资料变更后失效 |
 
 ### 落地细节
@@ -235,6 +237,7 @@ Feed Service 先查询 `video_id` 列表，再批量获取卡片和计数。
 - 使用 Redis MGET 一次读取多个 `video:stat`。
 - 缓存缺失的视频卡片批量回源 MySQL。
 - 回源结果写入 Redis，后续请求直接命中缓存。
+- 热榜读取合并最近 60 个分钟桶，只展示一小时内的互动热度排名。
 - 返回字段固定，减少接口序列化成本。
 
 ### 验收指标
@@ -407,6 +410,7 @@ flowchart LR
 - 点赞和收藏行为表建立唯一键：`user_id + video_id + action`。
 - Redis 保存用户行为状态：`interaction:{user_id}:{video_id}:{action}`。
 - Redis 保存视频计数：`video:stat:v1:{video_id}`，字段包含 `like_count`、`favorite_count`、`comment_count`。
+- Redis 热榜分钟桶记录互动热度：点赞 3 分、收藏 4 分、评论 5 分，取消行为写入对应负分。
 - 评论主记录同步写 MySQL，保证评论详情可查询。
 - 评论计数通过 Redis INCR 快速返回，再异步写 MySQL 快照。
 - 评论列表使用 cursor 分页，热门视频评论第一页进入短 TTL 缓存。

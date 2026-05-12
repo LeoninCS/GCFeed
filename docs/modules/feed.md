@@ -62,9 +62,8 @@
 
 | 排序字段 | 方向 | 说明 |
 | --- | --- | --- |
-| `hot_score` | DESC | `like_count * 3 + comment_count * 5 + favorite_count * 4` |
-| `published_at` | DESC | 同分时发布时间越新越靠前 |
-| `id` | DESC | 同分同发布时间下按视频ID倒序 |
+| `hot_score` | DESC | 最近 60 个分钟桶内的互动热度分 |
+| `video_id` | DESC | 同分时按视频 ID 倒序 |
 
 游标内容：
 
@@ -79,9 +78,8 @@
 
 | 字段 | 说明 |
 | --- | --- |
-| `hot_score` | 当前页最后一条视频的热度分 |
-| `published_at` | 当前页最后一条视频的发布时间 |
-| `video_id` | 当前页最后一条视频ID |
+| `window_end` | 当前热榜窗口结束分钟 |
+| `offset` | 下一页起始排名位置 |
 
 ## 3. 数据表设计（最小实现）
 
@@ -114,3 +112,16 @@ video:stat:v1:{video_id}
 ```
 
 页缓存只保存 `video_id` 和排序字段。Feed Service 读取页后使用 Redis MGET 批量读取 `video:card` 和 `video:stat`，缓存缺失时批量回源 MySQL。页缓存未命中时使用 singleflight 合并同 key 回源请求。
+
+## 5. Hot 访问优化
+
+`scene=hot` 使用 Redis ZSET 维护一小时滑动热榜，粒度为 1 分钟。互动写入时按权重写入当前分钟桶：点赞 3 分，收藏 4 分，评论 5 分；取消点赞、取消收藏、删除评论写入对应负分。
+
+缓存 key：
+
+```text
+feed:hot:minute:v1:{yyyyMMddHHmm}
+feed:hot:window:v1:{windowEndUnix}
+```
+
+读取热榜时，Feed Service 合并窗口结束分钟前 60 个分钟桶，移除汇总分小于等于 0 的条目，再按分数倒序读取当前页。分钟桶 TTL 为 2 小时，窗口临时 key TTL 为 2 分钟。
