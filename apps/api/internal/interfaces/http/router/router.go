@@ -74,7 +74,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	feedOptions := []applicationfeed.Option{}
 	if cfg.Redis.Addr != "" {
 		redisClient := infracache.NewRedisClient(cfg.Redis)
-		feedOptions = append(feedOptions, applicationfeed.WithTimelineCache(infracache.NewFeedCache(redisClient)))
+		feedOptions = append(feedOptions, applicationfeed.WithFeedCache(infracache.NewFeedCache(redisClient)))
 	}
 	feedService := applicationfeed.New(feedRepo, feedOptions...)
 	feedHandler := interfaceshttpfeed.New(feedService)

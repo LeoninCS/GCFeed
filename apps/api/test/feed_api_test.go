@@ -42,11 +42,16 @@ type memoryFeedRepo struct {
 	mu            sync.Mutex
 	items         []*domainfeed.FeedItem
 	timelineCalls int
+	hotCalls      int
+	cardCalls     int
+	statCalls     int
 }
 
 type memoryFeedCache struct {
 	mu    sync.Mutex
-	items map[string]*applicationfeed.FeedResult
+	pages map[string]*applicationfeed.FeedPage
+	cards map[int64]*domainfeed.FeedCard
+	stats map[int64]*domainfeed.FeedStat
 }
 
 func newMemoryFeedRepo(items []*domainfeed.FeedItem) *memoryFeedRepo {
@@ -54,7 +59,11 @@ func newMemoryFeedRepo(items []*domainfeed.FeedItem) *memoryFeedRepo {
 }
 
 func newMemoryFeedCache() *memoryFeedCache {
-	return &memoryFeedCache{items: map[string]*applicationfeed.FeedResult{}}
+	return &memoryFeedCache{
+		pages: map[string]*applicationfeed.FeedPage{},
+		cards: map[int64]*domainfeed.FeedCard{},
+		stats: map[int64]*domainfeed.FeedStat{},
+	}
 }
 
 func (r *memoryFeedRepo) TimelineCalls() int {
@@ -63,17 +72,29 @@ func (r *memoryFeedRepo) TimelineCalls() int {
 	return r.timelineCalls
 }
 
-// ListTimelineFeed 模拟真实仓储的 published_at DESC, video_id DESC 排序。
-func (r *memoryFeedRepo) ListTimelineFeed(ctx context.Context, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedItem, error) {
+func (r *memoryFeedRepo) CardCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.cardCalls
+}
+
+func (r *memoryFeedRepo) StatCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.statCalls
+}
+
+// ListTimelinePage 模拟真实仓储的 published_at DESC, video_id DESC 排序。
+func (r *memoryFeedRepo) ListTimelinePage(ctx context.Context, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedPageItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.timelineCalls++
 
-	items := make([]*domainfeed.FeedItem, 0, len(r.items))
+	items := make([]*domainfeed.FeedPageItem, 0, len(r.items))
 	for _, item := range r.items {
 		// cursor 代表上一页最后一条数据，下一页从它之后开始。
 		if cursor == nil || item.PublishedAt.Before(cursor.PublishedAt) || (item.PublishedAt.Equal(cursor.PublishedAt) && item.VideoID < cursor.VideoID) {
-			items = append(items, cloneFeedItem(item))
+			items = append(items, feedPageItemFromFeedItem(item))
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -89,34 +110,98 @@ func (r *memoryFeedRepo) ListTimelineFeed(ctx context.Context, cursor *domainfee
 	return items[:limit], nil
 }
 
-func (c *memoryFeedCache) Get(ctx context.Context, key string) (*applicationfeed.FeedResult, bool, error) {
+func (c *memoryFeedCache) GetPage(ctx context.Context, key string) (*applicationfeed.FeedPage, bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	result, ok := c.items[key]
-	return result, ok, nil
+	page, ok := c.pages[key]
+	if !ok {
+		return nil, false, nil
+	}
+	cloned := *page
+	cloned.Items = cloneFeedPageItems(page.Items)
+	return &cloned, true, nil
 }
 
-func (c *memoryFeedCache) Set(ctx context.Context, key string, result *applicationfeed.FeedResult, ttl time.Duration) error {
+func (c *memoryFeedCache) SetPage(ctx context.Context, key string, page *applicationfeed.FeedPage, ttl time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.items[key] = result
+	cloned := *page
+	cloned.Items = cloneFeedPageItems(page.Items)
+	c.pages[key] = &cloned
 	return nil
 }
 
-// ListHotFeed 模拟真实仓储的 hot_score DESC, published_at DESC, video_id DESC 排序。
-func (r *memoryFeedRepo) ListHotFeed(ctx context.Context, cursor *domainfeed.HotCursor, limit int) ([]*domainfeed.FeedItem, error) {
+func (c *memoryFeedCache) GetCards(ctx context.Context, videoIDs []int64) (map[int64]*domainfeed.FeedCard, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	cards := map[int64]*domainfeed.FeedCard{}
+	for _, videoID := range videoIDs {
+		if card := c.cards[videoID]; card != nil {
+			cloned := *card
+			cards[videoID] = &cloned
+		}
+	}
+	return cards, nil
+}
+
+func (c *memoryFeedCache) SetCards(ctx context.Context, cards map[int64]*domainfeed.FeedCard, ttl time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for videoID, card := range cards {
+		if card == nil {
+			continue
+		}
+		cloned := *card
+		c.cards[videoID] = &cloned
+	}
+	return nil
+}
+
+func (c *memoryFeedCache) GetStats(ctx context.Context, videoIDs []int64) (map[int64]*domainfeed.FeedStat, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	stats := map[int64]*domainfeed.FeedStat{}
+	for _, videoID := range videoIDs {
+		if stat := c.stats[videoID]; stat != nil {
+			cloned := *stat
+			stats[videoID] = &cloned
+		}
+	}
+	return stats, nil
+}
+
+func (c *memoryFeedCache) SetStats(ctx context.Context, stats map[int64]*domainfeed.FeedStat, ttl time.Duration) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for videoID, stat := range stats {
+		if stat == nil {
+			continue
+		}
+		cloned := *stat
+		c.stats[videoID] = &cloned
+	}
+	return nil
+}
+
+// ListHotPage 模拟真实仓储的 hot_score DESC, published_at DESC, video_id DESC 排序。
+func (r *memoryFeedRepo) ListHotPage(ctx context.Context, cursor *domainfeed.HotCursor, limit int) ([]*domainfeed.FeedPageItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.hotCalls++
 
-	items := make([]*domainfeed.FeedItem, 0, len(r.items))
+	items := make([]*domainfeed.FeedPageItem, 0, len(r.items))
 	for _, item := range r.items {
 		if cursor == nil ||
 			item.HotScore < cursor.HotScore ||
 			(item.HotScore == cursor.HotScore && item.PublishedAt.Before(cursor.PublishedAt)) ||
 			(item.HotScore == cursor.HotScore && item.PublishedAt.Equal(cursor.PublishedAt) && item.VideoID < cursor.VideoID) {
-			items = append(items, cloneFeedItem(item))
+			items = append(items, feedPageItemFromFeedItem(item))
 		}
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -133,6 +218,36 @@ func (r *memoryFeedRepo) ListHotFeed(ctx context.Context, cursor *domainfeed.Hot
 		limit = len(items)
 	}
 	return items[:limit], nil
+}
+
+func (r *memoryFeedRepo) BatchGetFeedCards(ctx context.Context, videoIDs []int64) (map[int64]*domainfeed.FeedCard, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cardCalls++
+
+	cards := map[int64]*domainfeed.FeedCard{}
+	wanted := int64Set(videoIDs)
+	for _, item := range r.items {
+		if _, ok := wanted[item.VideoID]; ok {
+			cards[item.VideoID] = feedCardFromFeedItem(item)
+		}
+	}
+	return cards, nil
+}
+
+func (r *memoryFeedRepo) BatchGetFeedStats(ctx context.Context, videoIDs []int64) (map[int64]*domainfeed.FeedStat, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.statCalls++
+
+	stats := map[int64]*domainfeed.FeedStat{}
+	wanted := int64Set(videoIDs)
+	for _, item := range r.items {
+		if _, ok := wanted[item.VideoID]; ok {
+			stats[item.VideoID] = feedStatFromFeedItem(item)
+		}
+	}
+	return stats, nil
 }
 
 // TestFeedAPIFlow 覆盖 Feed 首页、下一页游标和刷新读取。
@@ -248,11 +363,17 @@ func TestTimelineFeedCache(t *testing.T) {
 	if repo.TimelineCalls() != 1 {
 		t.Fatalf("unexpected timeline repo calls after first request: %d", repo.TimelineCalls())
 	}
+	if repo.CardCalls() != 1 || repo.StatCalls() != 1 {
+		t.Fatalf("unexpected card/stat repo calls after first request: card=%d stat=%d", repo.CardCalls(), repo.StatCalls())
+	}
 
 	secondResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=timeline&limit=2", "", "")
 	requireStatus(t, secondResponse, http.StatusOK)
 	if repo.TimelineCalls() != 1 {
 		t.Fatalf("unexpected timeline repo calls after cached request: %d", repo.TimelineCalls())
+	}
+	if repo.CardCalls() != 1 || repo.StatCalls() != 1 {
+		t.Fatalf("unexpected card/stat repo calls after cached request: card=%d stat=%d", repo.CardCalls(), repo.StatCalls())
 	}
 
 	var secondPage feedAPIResponse
@@ -311,8 +432,52 @@ func seedHotFeedItems() []*domainfeed.FeedItem {
 	}
 }
 
-// cloneFeedItem 返回 FeedItem 副本，隔离仓储内部数据。
-func cloneFeedItem(item *domainfeed.FeedItem) *domainfeed.FeedItem {
-	cloned := *item
-	return &cloned
+func feedPageItemFromFeedItem(item *domainfeed.FeedItem) *domainfeed.FeedPageItem {
+	return &domainfeed.FeedPageItem{
+		VideoID:     item.VideoID,
+		PublishedAt: item.PublishedAt,
+		HotScore:    item.HotScore,
+	}
+}
+
+func feedCardFromFeedItem(item *domainfeed.FeedItem) *domainfeed.FeedCard {
+	return &domainfeed.FeedCard{
+		VideoID:         item.VideoID,
+		AuthorID:        item.AuthorID,
+		AuthorNickname:  item.AuthorNickname,
+		AuthorAvatarURL: item.AuthorAvatarURL,
+		Title:           item.Title,
+		Description:     item.Description,
+		MediaURL:        item.MediaURL,
+		CoverURL:        item.CoverURL,
+	}
+}
+
+func feedStatFromFeedItem(item *domainfeed.FeedItem) *domainfeed.FeedStat {
+	return &domainfeed.FeedStat{
+		VideoID:       item.VideoID,
+		LikeCount:     item.LikeCount,
+		CommentCount:  item.CommentCount,
+		FavoriteCount: item.FavoriteCount,
+	}
+}
+
+func cloneFeedPageItems(items []*domainfeed.FeedPageItem) []*domainfeed.FeedPageItem {
+	cloned := make([]*domainfeed.FeedPageItem, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		value := *item
+		cloned = append(cloned, &value)
+	}
+	return cloned
+}
+
+func int64Set(values []int64) map[int64]struct{} {
+	set := map[int64]struct{}{}
+	for _, value := range values {
+		set[value] = struct{}{}
+	}
+	return set
 }

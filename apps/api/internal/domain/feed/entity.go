@@ -36,6 +36,33 @@ type FeedItem struct {
 	PublishedAt     time.Time
 }
 
+// FeedPageItem 是 Feed 页缓存中的轻量条目，只保存排序和组装所需字段。
+type FeedPageItem struct {
+	VideoID     int64
+	PublishedAt time.Time
+	HotScore    int
+}
+
+// FeedCard 保存视频卡片中相对稳定的展示字段。
+type FeedCard struct {
+	VideoID         int64
+	AuthorID        int64
+	AuthorNickname  string
+	AuthorAvatarURL string
+	Title           string
+	Description     string
+	MediaURL        string
+	CoverURL        string
+}
+
+// FeedStat 保存视频卡片中的高频计数字段。
+type FeedStat struct {
+	VideoID       int64
+	LikeCount     int
+	CommentCount  int
+	FavoriteCount int
+}
+
 // TimelineCursor 保存时间线分页所需的排序字段。
 type TimelineCursor struct {
 	PublishedAt time.Time

@@ -5,7 +5,6 @@ import (
 	domainvideo "GCFeed/internal/domain/video"
 	"context"
 	"fmt"
-	"time"
 
 	"gorm.io/gorm"
 )
@@ -14,23 +13,6 @@ const hotScoreExpression = "COALESCE(vs.like_count, 0) * 3 + COALESCE(vs.comment
 
 type Repository struct {
 	db *gorm.DB
-}
-
-// timelineFeedVideoModel 承接 Feed 联表查询结果。
-type timelineFeedVideoModel struct {
-	VideoID         int64
-	AuthorID        int64
-	AuthorNickname  string
-	AuthorAvatarURL string
-	Title           string
-	Description     string
-	MediaURL        string
-	CoverURL        string
-	LikeCount       int
-	CommentCount    int
-	FavoriteCount   int
-	HotScore        int
-	PublishedAt     time.Time
 }
 
 // New 创建 Feed 仓储实现。
@@ -55,10 +37,10 @@ func EnsureTimelineIndex(db *gorm.DB) error {
 	return db.Exec("CREATE INDEX idx_video_timeline ON video (status, published_at DESC, id DESC)").Error
 }
 
-// ListTimelineFeed 查询时间线 Feed，视频、作者和统计数据在这里一次性拼好。
-func (r *Repository) ListTimelineFeed(ctx context.Context, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedItem, error) {
-	var models []timelineFeedVideoModel
-	query := r.baseFeedQuery(ctx)
+// ListTimelinePage 查询时间线 Feed 轻量页，卡片和计数由应用层批量组装。
+func (r *Repository) ListTimelinePage(ctx context.Context, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedPageItem, error) {
+	var models []domainfeed.FeedPageItem
+	query := r.basePageQuery(ctx)
 
 	if cursor != nil {
 		// 游标分页条件和排序字段保持一致：published_at DESC, id DESC。
@@ -79,32 +61,13 @@ func (r *Repository) ListTimelineFeed(ctx context.Context, cursor *domainfeed.Ti
 	if err != nil {
 		return nil, err
 	}
-
-	items := make([]*domainfeed.FeedItem, 0, len(models))
-	for _, model := range models {
-		// 仓储层把数据库查询结果恢复成领域 FeedItem，HTTP 层只处理响应格式。
-		items = append(items, domainfeed.RestoreFeedItem(
-			model.VideoID,
-			model.AuthorID,
-			model.AuthorNickname,
-			model.AuthorAvatarURL,
-			model.Title,
-			model.Description,
-			model.MediaURL,
-			model.CoverURL,
-			model.LikeCount,
-			model.CommentCount,
-			model.FavoriteCount,
-			model.PublishedAt,
-		))
-	}
-	return items, nil
+	return feedPageItemsFromModels(models), nil
 }
 
-// ListHotFeed 查询热榜 Feed，按互动热度倒序，并使用发布时间和视频 ID 保持稳定排序。
-func (r *Repository) ListHotFeed(ctx context.Context, cursor *domainfeed.HotCursor, limit int) ([]*domainfeed.FeedItem, error) {
-	var models []timelineFeedVideoModel
-	query := r.baseFeedQuery(ctx)
+// ListHotPage 查询热榜 Feed 轻量页，按互动热度倒序稳定分页。
+func (r *Repository) ListHotPage(ctx context.Context, cursor *domainfeed.HotCursor, limit int) ([]*domainfeed.FeedPageItem, error) {
+	var models []domainfeed.FeedPageItem
+	query := r.baseHotPageQuery(ctx)
 
 	if cursor != nil {
 		query = query.Where(
@@ -129,38 +92,78 @@ func (r *Repository) ListHotFeed(ctx context.Context, cursor *domainfeed.HotCurs
 		return nil, err
 	}
 
-	return feedItemsFromModels(models), nil
+	return feedPageItemsFromModels(models), nil
 }
 
-func (r *Repository) baseFeedQuery(ctx context.Context) *gorm.DB {
+// BatchGetFeedCards 批量读取视频卡片展示字段，缓存缺失时由应用层调用。
+func (r *Repository) BatchGetFeedCards(ctx context.Context, videoIDs []int64) (map[int64]*domainfeed.FeedCard, error) {
+	cards := map[int64]*domainfeed.FeedCard{}
+	if len(videoIDs) == 0 {
+		return cards, nil
+	}
+
+	var models []domainfeed.FeedCard
+	err := r.db.WithContext(ctx).
+		Table("video AS v").
+		Select("v.id AS video_id, v.author_id, a.nickname AS author_nickname, a.avatar_url AS author_avatar_url, v.title, v.description, v.media_url, v.cover_url").
+		Joins("LEFT JOIN account AS a ON a.id = v.author_id").
+		Where("v.id IN ? AND v.status = ? AND v.published_at IS NOT NULL", videoIDs, domainvideo.StatusPublished).
+		Scan(&models).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	for index := range models {
+		cards[models[index].VideoID] = &models[index]
+	}
+	return cards, nil
+}
+
+// BatchGetFeedStats 批量读取互动计数，缺失统计记录时按 0 处理。
+func (r *Repository) BatchGetFeedStats(ctx context.Context, videoIDs []int64) (map[int64]*domainfeed.FeedStat, error) {
+	stats := map[int64]*domainfeed.FeedStat{}
+	if len(videoIDs) == 0 {
+		return stats, nil
+	}
+	for _, videoID := range videoIDs {
+		stats[videoID] = &domainfeed.FeedStat{VideoID: videoID}
+	}
+
+	var models []domainfeed.FeedStat
+	err := r.db.WithContext(ctx).
+		Table("video_stat").
+		Select("video_id, like_count, comment_count, favorite_count").
+		Where("video_id IN ?", videoIDs).
+		Scan(&models).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	for index := range models {
+		stats[models[index].VideoID] = &models[index]
+	}
+	return stats, nil
+}
+
+func (r *Repository) basePageQuery(ctx context.Context) *gorm.DB {
 	return r.db.WithContext(ctx).
 		Table("video AS v").
-		Select("v.id AS video_id, v.author_id, a.nickname AS author_nickname, a.avatar_url AS author_avatar_url, v.title, v.description, v.media_url, v.cover_url, COALESCE(vs.like_count, 0) AS like_count, COALESCE(vs.comment_count, 0) AS comment_count, COALESCE(vs.favorite_count, 0) AS favorite_count, ("+hotScoreExpression+") AS hot_score, v.published_at").
-		Joins("LEFT JOIN account AS a ON a.id = v.author_id").
+		Select("v.id AS video_id, v.published_at").
+		Where("v.status = ? AND v.published_at IS NOT NULL", domainvideo.StatusPublished)
+}
+
+func (r *Repository) baseHotPageQuery(ctx context.Context) *gorm.DB {
+	return r.db.WithContext(ctx).
+		Table("video AS v").
+		Select("v.id AS video_id, ("+hotScoreExpression+") AS hot_score, v.published_at").
 		Joins("LEFT JOIN video_stat AS vs ON vs.video_id = v.id").
 		Where("v.status = ? AND v.published_at IS NOT NULL", domainvideo.StatusPublished)
 }
 
-func feedItemsFromModels(models []timelineFeedVideoModel) []*domainfeed.FeedItem {
-	items := make([]*domainfeed.FeedItem, 0, len(models))
-	for _, model := range models {
-		// 仓储层把数据库查询结果恢复成领域 FeedItem，HTTP 层只处理响应格式。
-		item := domainfeed.RestoreFeedItem(
-			model.VideoID,
-			model.AuthorID,
-			model.AuthorNickname,
-			model.AuthorAvatarURL,
-			model.Title,
-			model.Description,
-			model.MediaURL,
-			model.CoverURL,
-			model.LikeCount,
-			model.CommentCount,
-			model.FavoriteCount,
-			model.PublishedAt,
-		)
-		item.HotScore = model.HotScore
-		items = append(items, item)
+func feedPageItemsFromModels(models []domainfeed.FeedPageItem) []*domainfeed.FeedPageItem {
+	items := make([]*domainfeed.FeedPageItem, 0, len(models))
+	for index := range models {
+		items = append(items, &models[index])
 	}
 	return items
 }
