@@ -2,6 +2,8 @@
 
 这是一个面向短视频场景的 Feed 系统工程，目标是用最小可行架构承载完整业务闭环，并为后续扩展提供稳定基础。
 
+新读者可以先看 [如何快速读懂 GCFeed](docs/quickread.md)，按推荐顺序理解项目结构、核心链路和代码阅读入口。
+
 ## 项目定位
 
 - 以视频信息流为核心场景，覆盖内容供给、分发、消费与治理的全链路能力。
@@ -182,5 +184,6 @@ docker compose down -v
 
 ## 文档入口
 
+- 代码阅读导览：[docs/quickread.md](docs/quickread.md)
 - 产品与模块设计：`docs/product.md`、`docs/modules/`
 - 系统架构图：`docs/architecture.md`
