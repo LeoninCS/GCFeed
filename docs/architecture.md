@@ -180,10 +180,13 @@ sequenceDiagram
   C->>R: GET /api/feed-items?cursor=...&limit=...
   R->>H: Feed.Timeline
   H->>S: GetTimelineFeed
-  S->>Repo: ListTimelineFeed
-  Repo->>DB: SELECT video LEFT JOIN account LEFT JOIN video_stat
-  DB-->>Repo: 返回 Feed 行
-  Repo-->>S: 返回 FeedItem 列表
+  S->>Repo: ListTimelinePage
+  Repo->>DB: SELECT video_id, published_at
+  DB-->>Repo: 返回轻量页
+  S->>Redis: MGET video:card / video:stat
+  S->>Repo: BatchGetFeedCards / BatchGetFeedStats
+  Repo->>DB: 批量回源缺失卡片和计数
+  Repo-->>S: 返回缺失数据
   S-->>H: 返回 items + next_cursor + has_more
   H-->>C: 返回 Timeline Feed
 ```

@@ -225,8 +225,8 @@ Feed Service 先查询 `video_id` 列表，再批量获取卡片和计数。
 
 | 缓存 key | 数据内容 | TTL 建议 | 更新方式 |
 | --- | --- | --- | --- |
-| `video:card:{video_id}` | 标题、封面、播放地址、作者昵称、作者头像、状态版本 | 5 分钟到 30 分钟 | 视频或作者变更后失效 |
-| `video:stat:{video_id}` | 点赞数、评论数、收藏数、播放数 | 5 秒到 60 秒 | Redis 写入，异步同步 DB |
+| `video:card:v1:{video_id}` | 标题、封面、播放地址、作者昵称、作者头像、状态版本 | 15 分钟 | 视频或作者变更后失效 |
+| `video:stat:v1:{video_id}` | 点赞数、评论数、收藏数、播放数 | 15 秒 | Redis 写入，异步同步 DB |
 | `user:profile:{user_id}` | 昵称、头像、简介 | 5 分钟到 30 分钟 | 用户资料变更后失效 |
 
 ### 落地细节
@@ -341,9 +341,9 @@ sequenceDiagram
 
 ### 落地细节
 
-- 视频下架：删除 `video:card:{video_id}`，Feed 查询时过滤 `status`。
+- 视频下架：删除 `video:card:v1:{video_id}`，Feed 查询时过滤 `status`。
 - 作者改名：删除 `user:profile:{user_id}`，相关卡片下一次读取时刷新。
-- 封面更新：删除 `video:card:{video_id}`。
+- 封面更新：删除 `video:card:v1:{video_id}`。
 - 点赞计数：更新 Redis 计数，异步写入 MySQL 快照。
 - 缓存值带 `updated_at` 和 `version`，便于定位旧数据来源。
 
@@ -406,7 +406,7 @@ flowchart LR
 
 - 点赞和收藏行为表建立唯一键：`user_id + video_id + action`。
 - Redis 保存用户行为状态：`interaction:{user_id}:{video_id}:{action}`。
-- Redis 保存视频计数：`video:stat:{video_id}`，字段包含 `like_count`、`favorite_count`、`comment_count`。
+- Redis 保存视频计数：`video:stat:v1:{video_id}`，字段包含 `like_count`、`favorite_count`、`comment_count`。
 - 评论主记录同步写 MySQL，保证评论详情可查询。
 - 评论计数通过 Redis INCR 快速返回，再异步写 MySQL 快照。
 - 评论列表使用 cursor 分页，热门视频评论第一页进入短 TTL 缓存。

@@ -101,12 +101,16 @@ CREATE INDEX idx_video_timeline ON video (status, published_at DESC, id DESC);
 | --- | --- |
 | 首页 | 5 秒 + 抖动 |
 | 后续页 | 45 秒 + 抖动 |
+| 视频卡片 | 15 分钟 |
+| 视频计数 | 15 秒 |
 
 缓存 key：
 
 ```text
-feed:timeline:v1:limit:{limit}:first
-feed:timeline:v1:limit:{limit}:cursor:{cursorHash}
+feed:page:v1:{scene}:limit:{limit}:first
+feed:page:v1:{scene}:limit:{limit}:cursor:{cursorHash}
+video:card:v1:{video_id}
+video:stat:v1:{video_id}
 ```
 
-缓存未命中时使用 singleflight 合并同 key 回源请求，缓存读取或写入异常时回源 MySQL。
+页缓存只保存 `video_id` 和排序字段。Feed Service 读取页后使用 Redis MGET 批量读取 `video:card` 和 `video:stat`，缓存缺失时批量回源 MySQL。页缓存未命中时使用 singleflight 合并同 key 回源请求。
