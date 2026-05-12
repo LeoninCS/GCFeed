@@ -48,5 +48,4 @@ func main() {
 	if err := infrahttpgin.Run(cfg, g); err != nil {
 		log.Fatalf("run server failed: %v", err)
 	}
-
 }
