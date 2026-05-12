@@ -2,7 +2,9 @@ package infracache
 
 import (
 	applicationfeed "GCFeed/internal/application/feed"
+	applicationinteraction "GCFeed/internal/application/interaction"
 	domainfeed "GCFeed/internal/domain/feed"
+	domaininteraction "GCFeed/internal/domain/interaction"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,14 +18,22 @@ import (
 const hotWindowMinutes = 60
 const hotMinuteBucketTTL = 2 * time.Hour
 const hotWindowCacheTTL = 2 * time.Minute
+const actionStateTTL = 30 * 24 * time.Hour
+const actionStatTTL = 24 * time.Hour
+const actionStatJSONTTL = 15 * time.Second
+
+type redisWatchCmdable interface {
+	redis.Cmdable
+	Watch(ctx context.Context, fn func(*redis.Tx) error, keys ...string) error
+}
 
 // FeedCache 使用 Redis 保存 Feed 查询结果。
 type FeedCache struct {
-	client redis.Cmdable
+	client redisWatchCmdable
 }
 
 // NewFeedCache 创建 Feed 结果缓存。
-func NewFeedCache(client redis.Cmdable) *FeedCache {
+func NewFeedCache(client redisWatchCmdable) *FeedCache {
 	return &FeedCache{client: client}
 }
 
@@ -202,6 +212,133 @@ func (c *FeedCache) ListHotWindowPage(ctx context.Context, windowEnd time.Time, 
 	return items, nil
 }
 
+// SetActionState 写入 Redis 行为状态和实时计数，供点赞收藏接口快速返回。
+func (c *FeedCache) SetActionState(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string, initialStat *domaininteraction.VideoStat) (*applicationinteraction.ActionStateResult, error) {
+	actionType, err := domaininteraction.NormalizeActionType(actionType)
+	if err != nil {
+		return nil, err
+	}
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+
+	actionKey := interactionActionKey(userID, videoID, actionType)
+	counterKey := interactionStatCounterKey(videoID)
+	jsonKey := feedStatKey(videoID)
+	targetStatus := domaininteraction.ActionStatusCanceled
+	if active {
+		targetStatus = domaininteraction.ActionStatusActive
+	}
+
+	var result *applicationinteraction.ActionStateResult
+	err = c.client.Watch(ctx, func(tx *redis.Tx) error {
+		values, err := tx.HGetAll(ctx, actionKey).Result()
+		if err != nil {
+			return err
+		}
+
+		storedStatus, _ := strconv.Atoi(values["status"])
+		storedIDKey := values["idempotency_key"]
+		effectiveActive := active
+		effectiveStatus := targetStatus
+		delta := 0
+		if storedIDKey == idempotencyKey && idempotencyKey != "" {
+			effectiveActive = storedStatus == domaininteraction.ActionStatusActive
+			effectiveStatus = storedStatus
+			delta = 0
+		} else {
+			if storedStatus == 0 {
+				if active {
+					delta = 1
+				}
+			} else if storedStatus != targetStatus {
+				if active {
+					delta = 1
+				} else {
+					delta = -1
+				}
+			}
+		}
+
+		stat, err := actionStat(ctx, tx, counterKey, jsonKey, videoID, initialStat)
+		if err != nil {
+			return err
+		}
+		setInteractionStatField(stat, actionType, clampRedisCount(interactionStatFieldValue(stat, actionType)+delta))
+
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			pipe.HSet(ctx, actionKey, map[string]any{
+				"status":          effectiveStatus,
+				"idempotency_key": idempotencyKey,
+				"updated_at":      time.Now().UTC().Format(time.RFC3339Nano),
+			})
+			pipe.Expire(ctx, actionKey, actionStateTTL)
+			pipe.HSet(ctx, counterKey, map[string]any{
+				"like_count":     stat.LikeCount,
+				"comment_count":  stat.CommentCount,
+				"favorite_count": stat.FavoriteCount,
+			})
+			pipe.Expire(ctx, counterKey, actionStatTTL)
+			content, err := json.Marshal(stat)
+			if err != nil {
+				return err
+			}
+			pipe.Set(ctx, jsonKey, content, actionStatJSONTTL)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		result = &applicationinteraction.ActionStateResult{
+			VideoID:        videoID,
+			ActionType:     actionType,
+			Active:         effectiveActive,
+			LikeCount:      stat.LikeCount,
+			FavoriteCount:  stat.FavoriteCount,
+			Delta:          delta,
+			IdempotencyKey: idempotencyKey,
+		}
+		return nil
+	}, actionKey, counterKey, jsonKey)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func actionStat(ctx context.Context, client redis.Cmdable, counterKey string, jsonKey string, videoID int64, initialStat *domaininteraction.VideoStat) (*domainfeed.FeedStat, error) {
+	stat := &domainfeed.FeedStat{VideoID: videoID}
+	values, err := client.HGetAll(ctx, counterKey).Result()
+	if err != nil {
+		return nil, err
+	}
+	if len(values) > 0 {
+		stat.LikeCount, _ = strconv.Atoi(values["like_count"])
+		stat.CommentCount, _ = strconv.Atoi(values["comment_count"])
+		stat.FavoriteCount, _ = strconv.Atoi(values["favorite_count"])
+		return stat, nil
+	}
+
+	content, err := client.Get(ctx, jsonKey).Bytes()
+	if err == redis.Nil {
+		if initialStat != nil {
+			stat.LikeCount = initialStat.LikeCount
+			stat.CommentCount = initialStat.CommentCount
+			stat.FavoriteCount = initialStat.FavoriteCount
+		}
+		return stat, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(content, stat); err != nil {
+		return &domainfeed.FeedStat{VideoID: videoID}, nil
+	}
+	if stat.VideoID <= 0 {
+		stat.VideoID = videoID
+	}
+	return stat, nil
+}
+
 func cacheKeys(videoIDs []int64, build func(int64) string) []string {
 	keys := make([]string, 0, len(videoIDs))
 	for _, videoID := range videoIDs {
@@ -216,6 +353,43 @@ func feedCardKey(videoID int64) string {
 
 func feedStatKey(videoID int64) string {
 	return fmt.Sprintf("video:stat:v1:%d", videoID)
+}
+
+func interactionActionKey(userID int64, videoID int64, actionType string) string {
+	return fmt.Sprintf("interaction:action:v1:%d:%d:%s", userID, videoID, strings.ToLower(actionType))
+}
+
+func interactionStatCounterKey(videoID int64) string {
+	return fmt.Sprintf("video:stat:counter:v1:%d", videoID)
+}
+
+func interactionStatField(actionType string) string {
+	if actionType == domaininteraction.ActionTypeLike {
+		return "like_count"
+	}
+	return "favorite_count"
+}
+
+func interactionStatFieldValue(stat *domainfeed.FeedStat, actionType string) int {
+	if actionType == domaininteraction.ActionTypeLike {
+		return stat.LikeCount
+	}
+	return stat.FavoriteCount
+}
+
+func setInteractionStatField(stat *domainfeed.FeedStat, actionType string, value int) {
+	if actionType == domaininteraction.ActionTypeLike {
+		stat.LikeCount = value
+		return
+	}
+	stat.FavoriteCount = value
+}
+
+func clampRedisCount(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
 }
 
 func hotMinuteKey(at time.Time) string {

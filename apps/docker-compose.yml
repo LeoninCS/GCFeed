@@ -29,6 +29,20 @@ services:
       timeout: 3s
       retries: 20
 
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: gcfeed-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   api:
     build:
       context: ./api
@@ -38,6 +52,8 @@ services:
       mysql:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     ports:
       - "8080:8080"
@@ -65,4 +81,5 @@ services:
 volumes:
   mysql_data:
   redis_data:
+  rabbitmq_data:
   api_uploads:

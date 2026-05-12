@@ -9,6 +9,7 @@ import (
 	infracache "GCFeed/internal/infra/cache"
 	infraconfig "GCFeed/internal/infra/config"
 	infrajwt "GCFeed/internal/infra/jwt"
+	inframq "GCFeed/internal/infra/mq"
 	infraaccount "GCFeed/internal/infra/persistence/account"
 	infrafeed "GCFeed/internal/infra/persistence/feed"
 	infrainteraction "GCFeed/internal/infra/persistence/interaction"
@@ -21,7 +22,9 @@ import (
 	interfaceshttprelation "GCFeed/internal/interfaces/http/relation"
 	interfaceshttpupload "GCFeed/internal/interfaces/http/upload"
 	interfaceshttpvideo "GCFeed/internal/interfaces/http/video"
+	"context"
 	"database/sql"
+	"log"
 
 	"github.com/gin-gonic/gin"
 	gormmysql "gorm.io/driver/mysql"
@@ -73,15 +76,28 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	feedRepo := infrafeed.New(gormDB)
 	feedOptions := []applicationfeed.Option{}
 	interactionOptions := []applicationinteraction.Option{}
+	var feedCache *infracache.FeedCache
 	if cfg.Redis.Addr != "" {
 		redisClient := infracache.NewRedisClient(cfg.Redis)
-		feedCache := infracache.NewFeedCache(redisClient)
+		feedCache = infracache.NewFeedCache(redisClient)
 		feedOptions = append(feedOptions, applicationfeed.WithFeedCache(feedCache))
 		interactionOptions = append(interactionOptions, applicationinteraction.WithHotScoreRecorder(feedCache))
 	}
 	feedService := applicationfeed.New(feedRepo, feedOptions...)
 	feedHandler := interfaceshttpfeed.New(feedService)
 	interactionRepo := infrainteraction.New(gormDB)
+	if feedCache != nil && cfg.RabbitMQ.URL != "" {
+		rabbitMQ, err := inframq.NewRabbitMQ(cfg.RabbitMQ)
+		if err != nil {
+			log.Printf("rabbitmq disabled: %v", err)
+		} else {
+			interactionOptions = append(interactionOptions, applicationinteraction.WithAsyncActionPipeline(feedCache, rabbitMQ))
+			worker := applicationinteraction.NewActionWorker(interactionRepo, rabbitMQ)
+			if err := worker.Start(context.Background()); err != nil {
+				log.Printf("interaction action worker disabled: %v", err)
+			}
+		}
+	}
 	interactionService := applicationinteraction.New(interactionRepo, interactionOptions...)
 	interactionHandler := interfaceshttpinteraction.New(interactionService)
 	relationRepo := infrarelation.New(gormDB)

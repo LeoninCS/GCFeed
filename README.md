@@ -44,8 +44,9 @@ docker compose up --build
 | API 健康检查 | `http://127.0.0.1:8080/health` |
 | MySQL | `127.0.0.1:3307` |
 | Redis | `127.0.0.1:6379` |
+| RabbitMQ | `http://127.0.0.1:15672` |
 
-Compose 会启动 `mysql`、`redis`、`api`、`web` 四个服务。API 容器使用 `apps/api/configs/config.docker.yaml`，数据库地址为 `mysql:3306`，Redis 地址为 `redis:6379`。
+Compose 会启动 `mysql`、`redis`、`rabbitmq`、`api`、`web` 五个服务。API 容器使用 `apps/api/configs/config.docker.yaml`，数据库地址为 `mysql:3306`，Redis 地址为 `redis:6379`，RabbitMQ 地址为 `rabbitmq:5672`。
 
 后台启动：
 

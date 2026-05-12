@@ -3,9 +3,12 @@ package applicationinteraction
 import (
 	domaininteraction "GCFeed/internal/domain/interaction"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -22,6 +25,8 @@ var ErrUpdateInteractionFailed = errors.New("failed to update interaction")
 type Service struct {
 	repo             domaininteraction.Repository
 	hotScoreRecorder HotScoreRecorder
+	actionStateStore ActionStateStore
+	actionPublisher  ActionEventPublisher
 }
 
 // HotScoreRecorder 把互动变化投递到热榜分钟桶。
@@ -30,6 +35,36 @@ type HotScoreRecorder interface {
 }
 
 type Option func(*Service)
+
+type ActionStateResult struct {
+	VideoID        int64
+	ActionType     string
+	Active         bool
+	LikeCount      int
+	FavoriteCount  int
+	Delta          int
+	IdempotencyKey string
+}
+
+// ActionStateStore 保存点赞收藏的快速状态和计数。
+type ActionStateStore interface {
+	SetActionState(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string, initialStat *domaininteraction.VideoStat) (*ActionStateResult, error)
+}
+
+// ActionEventPublisher 投递点赞收藏变更事件。
+type ActionEventPublisher interface {
+	PublishActionChanged(ctx context.Context, event *ActionChangedEvent) error
+}
+
+type ActionChangedEvent struct {
+	EventID        string    `json:"event_id"`
+	UserID         int64     `json:"user_id"`
+	VideoID        int64     `json:"video_id"`
+	ActionType     string    `json:"action_type"`
+	Active         bool      `json:"active"`
+	IdempotencyKey string    `json:"idempotency_key"`
+	OccurredAt     time.Time `json:"occurred_at"`
+}
 
 type ActionResult struct {
 	VideoID       int64
@@ -73,6 +108,14 @@ func New(repo domaininteraction.Repository, options ...Option) *Service {
 func WithHotScoreRecorder(recorder HotScoreRecorder) Option {
 	return func(s *Service) {
 		s.hotScoreRecorder = recorder
+	}
+}
+
+// WithAsyncActionPipeline 为点赞收藏启用 Redis 快速写和 MQ 异步落库。
+func WithAsyncActionPipeline(store ActionStateStore, publisher ActionEventPublisher) Option {
+	return func(s *Service) {
+		s.actionStateStore = store
+		s.actionPublisher = publisher
 	}
 }
 
@@ -211,8 +254,45 @@ func (s *Service) setAction(ctx context.Context, userID int64, videoID int64, ac
 	if err != nil {
 		return nil, err
 	}
+	if s.actionStateStore != nil && s.actionPublisher != nil {
+		return s.setActionAsync(ctx, userID, videoID, actionType, active, idempotencyKey)
+	}
 
-	// active 由 HTTP 方法决定：PUT 表示生效，DELETE 表示取消。
+	return s.setActionSync(ctx, userID, videoID, actionType, active, idempotencyKey)
+}
+
+func (s *Service) setActionAsync(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*ActionResult, error) {
+	initialStat, err := s.repo.GetVideoStat(ctx, videoID)
+	if err != nil {
+		if errors.Is(err, domaininteraction.ErrVideoNotFound) {
+			return nil, domaininteraction.ErrVideoNotFound
+		}
+		return nil, ErrUpdateInteractionFailed
+	}
+
+	state, err := s.actionStateStore.SetActionState(ctx, userID, videoID, actionType, active, idempotencyKey, initialStat)
+	if err != nil {
+		return nil, ErrUpdateInteractionFailed
+	}
+
+	if state.Delta != 0 {
+		event := NewActionChangedEvent(userID, videoID, actionType, active, idempotencyKey)
+		if err := s.actionPublisher.PublishActionChanged(ctx, event); err != nil {
+			return s.setActionSync(ctx, userID, videoID, actionType, active, idempotencyKey)
+		}
+		s.recordActionHotScore(ctx, state.VideoID, state.ActionType, state.Delta)
+	}
+
+	return &ActionResult{
+		VideoID:       state.VideoID,
+		ActionType:    state.ActionType,
+		Active:        state.Active,
+		LikeCount:     state.LikeCount,
+		FavoriteCount: state.FavoriteCount,
+	}, nil
+}
+
+func (s *Service) setActionSync(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*ActionResult, error) {
 	action, count, delta, err := s.repo.SetAction(ctx, userID, videoID, actionType, active, idempotencyKey)
 	if err != nil {
 		if errors.Is(err, domaininteraction.ErrVideoNotFound) {
@@ -228,19 +308,54 @@ func (s *Service) setAction(ctx context.Context, userID int64, videoID int64, ac
 	}
 	if action.ActionType == domaininteraction.ActionTypeLike {
 		result.LikeCount = count
-		s.recordHotScore(ctx, action.VideoID, delta*hotScoreLikeWeight)
 	} else {
 		result.FavoriteCount = count
-		s.recordHotScore(ctx, action.VideoID, delta*hotScoreFavoriteWeight)
 	}
+	s.recordActionHotScore(ctx, action.VideoID, action.ActionType, delta)
 	return result, nil
 }
 
+func (s *Service) recordActionHotScore(ctx context.Context, videoID int64, actionType string, delta int) {
+	recordActionHotScore(ctx, s.hotScoreRecorder, videoID, actionType, delta)
+}
+
 func (s *Service) recordHotScore(ctx context.Context, videoID int64, scoreDelta int) {
-	if s.hotScoreRecorder == nil || scoreDelta == 0 {
+	recordHotScore(ctx, s.hotScoreRecorder, videoID, scoreDelta)
+}
+
+func recordActionHotScore(ctx context.Context, recorder HotScoreRecorder, videoID int64, actionType string, delta int) {
+	if actionType == domaininteraction.ActionTypeLike {
+		recordHotScore(ctx, recorder, videoID, delta*hotScoreLikeWeight)
 		return
 	}
-	_ = s.hotScoreRecorder.AddHotScore(ctx, videoID, scoreDelta, time.Now())
+	recordHotScore(ctx, recorder, videoID, delta*hotScoreFavoriteWeight)
+}
+
+func recordHotScore(ctx context.Context, recorder HotScoreRecorder, videoID int64, scoreDelta int) {
+	if recorder == nil || scoreDelta == 0 {
+		return
+	}
+	_ = recorder.AddHotScore(ctx, videoID, scoreDelta, time.Now())
+}
+
+func NewActionChangedEvent(userID int64, videoID int64, actionType string, active bool, idempotencyKey string) *ActionChangedEvent {
+	return &ActionChangedEvent{
+		EventID:        newEventID(),
+		UserID:         userID,
+		VideoID:        videoID,
+		ActionType:     actionType,
+		Active:         active,
+		IdempotencyKey: strings.TrimSpace(idempotencyKey),
+		OccurredAt:     time.Now().UTC(),
+	}
+}
+
+func newEventID() string {
+	content := make([]byte, 12)
+	if _, err := rand.Read(content); err == nil {
+		return hex.EncodeToString(content)
+	}
+	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
 
 // normalizeCommentLimit 统一评论分页默认值和最大值。

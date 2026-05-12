@@ -81,6 +81,13 @@ type memoryHotScoreRecorder struct {
 	events []int
 }
 
+type memoryActionPipeline struct {
+	mu     sync.Mutex
+	states map[string]*applicationinteraction.ActionStateResult
+	stats  map[int64]memoryInteractionStat
+	events []*applicationinteraction.ActionChangedEvent
+}
+
 func newMemoryInteractionRepo() *memoryInteractionRepo {
 	return &memoryInteractionRepo{
 		nextActionID:  1,
@@ -94,6 +101,23 @@ func newMemoryInteractionRepo() *memoryInteractionRepo {
 		comments:    map[int64]*domaininteraction.Comment{},
 		commentIdem: map[string]int64{},
 	}
+}
+
+// GetVideoStat 模拟读取视频当前互动计数。
+func (r *memoryInteractionRepo) GetVideoStat(ctx context.Context, videoID int64) (*domaininteraction.VideoStat, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.videoPublished(videoID) {
+		return nil, domaininteraction.ErrVideoNotFound
+	}
+	stat := r.stats[videoID]
+	return &domaininteraction.VideoStat{
+		VideoID:       videoID,
+		LikeCount:     stat.LikeCount,
+		CommentCount:  stat.CommentCount,
+		FavoriteCount: stat.FavoriteCount,
+	}, nil
 }
 
 // SetAction 模拟点赞/收藏状态变更，并维护对应计数。
@@ -402,6 +426,56 @@ func TestInteractionHotScoreRecorder(t *testing.T) {
 	}
 }
 
+// TestInteractionAsyncActionPipeline 覆盖点赞收藏先写快速状态，再由事件 Worker 落库。
+func TestInteractionAsyncActionPipeline(t *testing.T) {
+	repo := newMemoryInteractionRepo()
+	recorder := newMemoryHotScoreRecorder()
+	pipeline := newMemoryActionPipeline()
+	service := applicationinteraction.New(
+		repo,
+		applicationinteraction.WithHotScoreRecorder(recorder),
+		applicationinteraction.WithAsyncActionPipeline(pipeline, pipeline),
+	)
+
+	liked, err := service.Like(context.Background(), 42, 1001, "like-async-1")
+	if err != nil {
+		t.Fatalf("like: %v", err)
+	}
+	if !liked.Active || liked.LikeCount != 1 {
+		t.Fatalf("unexpected async like result: %+v", liked)
+	}
+	if repo.ActionCountForTest(1001, domaininteraction.ActionTypeLike) != 0 {
+		t.Fatalf("repo should not be updated before worker")
+	}
+	if pipeline.EventCount() != 1 {
+		t.Fatalf("unexpected event count: %d", pipeline.EventCount())
+	}
+
+	replayed, err := service.Like(context.Background(), 42, 1001, "like-async-1")
+	if err != nil {
+		t.Fatalf("like replay: %v", err)
+	}
+	if replayed.LikeCount != 1 || pipeline.EventCount() != 1 {
+		t.Fatalf("unexpected async replay: result=%+v events=%d", replayed, pipeline.EventCount())
+	}
+
+	replayedUnlike, err := service.Unlike(context.Background(), 42, 1001, "like-async-1")
+	if err != nil {
+		t.Fatalf("unlike replay: %v", err)
+	}
+	if !replayedUnlike.Active || replayedUnlike.LikeCount != 1 || pipeline.EventCount() != 1 {
+		t.Fatalf("unexpected async reverse replay: result=%+v events=%d", replayedUnlike, pipeline.EventCount())
+	}
+
+	worker := applicationinteraction.NewActionWorker(repo, pipeline)
+	if err := worker.Start(context.Background()); err != nil {
+		t.Fatalf("start worker: %v", err)
+	}
+	if repo.ActionCountForTest(1001, domaininteraction.ActionTypeLike) != 1 {
+		t.Fatalf("repo should be updated by worker")
+	}
+}
+
 // newInteractionRouter 只装配互动相关 RESTful 路由。
 func newInteractionRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	t.Helper()
@@ -456,6 +530,12 @@ func (r *memoryInteractionRepo) actionCount(videoID int64, actionType string) in
 		return stat.LikeCount
 	}
 	return stat.FavoriteCount
+}
+
+func (r *memoryInteractionRepo) ActionCountForTest(videoID int64, actionType string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.actionCount(videoID, actionType)
 }
 
 // memoryInteractionActionKey 模拟 user_id + video_id + action_type 唯一索引。
@@ -535,6 +615,103 @@ func (r *memoryHotScoreRecorder) EventCount() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.events)
+}
+
+func newMemoryActionPipeline() *memoryActionPipeline {
+	return &memoryActionPipeline{
+		states: map[string]*applicationinteraction.ActionStateResult{},
+		stats:  map[int64]memoryInteractionStat{},
+		events: []*applicationinteraction.ActionChangedEvent{},
+	}
+}
+
+func (p *memoryActionPipeline) SetActionState(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string, initialStat *domaininteraction.VideoStat) (*applicationinteraction.ActionStateResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	key := memoryInteractionActionKey(userID, videoID, actionType)
+	state := p.states[key]
+	if _, exists := p.stats[videoID]; !exists && initialStat != nil {
+		p.stats[videoID] = memoryInteractionStat{
+			LikeCount:     initialStat.LikeCount,
+			CommentCount:  initialStat.CommentCount,
+			FavoriteCount: initialStat.FavoriteCount,
+		}
+	}
+	delta := 0
+	if state == nil {
+		if active {
+			delta = 1
+		}
+	} else if state.Active != active {
+		if active {
+			delta = 1
+		} else {
+			delta = -1
+		}
+	}
+	effectiveActive := active
+	if state != nil && idempotencyKey != "" && state.IdempotencyKey == strings.TrimSpace(idempotencyKey) {
+		effectiveActive = state.Active
+		delta = 0
+	}
+
+	stat := p.stats[videoID]
+	if actionType == domaininteraction.ActionTypeLike {
+		stat.LikeCount = clampMemoryCount(stat.LikeCount + delta)
+	} else {
+		stat.FavoriteCount = clampMemoryCount(stat.FavoriteCount + delta)
+	}
+	p.stats[videoID] = stat
+
+	result := &applicationinteraction.ActionStateResult{
+		VideoID:        videoID,
+		ActionType:     actionType,
+		Active:         effectiveActive,
+		LikeCount:      stat.LikeCount,
+		FavoriteCount:  stat.FavoriteCount,
+		Delta:          delta,
+		IdempotencyKey: strings.TrimSpace(idempotencyKey),
+	}
+	p.states[key] = result
+	return cloneActionStateResult(result), nil
+}
+
+func (p *memoryActionPipeline) PublishActionChanged(ctx context.Context, event *applicationinteraction.ActionChangedEvent) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	cloned := *event
+	p.events = append(p.events, &cloned)
+	return nil
+}
+
+func (p *memoryActionPipeline) ConsumeActionChanged(ctx context.Context, handler func(context.Context, *applicationinteraction.ActionChangedEvent) error) error {
+	p.mu.Lock()
+	events := make([]*applicationinteraction.ActionChangedEvent, 0, len(p.events))
+	for _, event := range p.events {
+		cloned := *event
+		events = append(events, &cloned)
+	}
+	p.mu.Unlock()
+
+	for _, event := range events {
+		if err := handler(ctx, event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *memoryActionPipeline) EventCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.events)
+}
+
+func cloneActionStateResult(result *applicationinteraction.ActionStateResult) *applicationinteraction.ActionStateResult {
+	cloned := *result
+	return &cloned
 }
 
 var _ domaininteraction.Repository = (*memoryInteractionRepo)(nil)

@@ -6,6 +6,7 @@ type Config struct {
 	JWT      JWTConfig      `yaml:"jwt"`
 	Database DatabaseConfig `yaml:"database"`
 	Redis    RedisConfig    `yaml:"redis"`
+	RabbitMQ RabbitMQConfig `yaml:"rabbitmq"`
 }
 
 // JWTConfig 保存 JWT 签名密钥和访问 token 有效期。
@@ -28,4 +29,12 @@ type RedisConfig struct {
 	Addr     string `yaml:"addr"`
 	Password string `yaml:"password"`
 	DB       int    `yaml:"db"`
+}
+
+// RabbitMQConfig 保存 RabbitMQ 连接和队列配置。
+type RabbitMQConfig struct {
+	URL                  string `yaml:"url"`
+	InteractionExchange  string `yaml:"interaction_exchange"`
+	ActionChangedQueue   string `yaml:"action_changed_queue"`
+	ActionChangedRouting string `yaml:"action_changed_routing"`
 }

@@ -52,6 +52,14 @@ type CommentCursor struct {
 	CommentID int64
 }
 
+// VideoStat 保存互动模块需要的视频统计快照。
+type VideoStat struct {
+	VideoID       int64
+	LikeCount     int
+	CommentCount  int
+	FavoriteCount int
+}
+
 // NormalizeActionType 统一行为类型大小写，避免外层传入 like、LIKE 等不同写法。
 func NormalizeActionType(value string) (string, error) {
 	value = strings.ToUpper(strings.TrimSpace(value))

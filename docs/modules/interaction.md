@@ -126,7 +126,22 @@ apps/api/internal/interfaces/http/interaction/
 }
 ```
 
-### 3.3 发表评论
+### 3.3 异步落库
+
+点赞和收藏启用 Redis 快速状态后，接口先校验视频状态和幂等键，再写入 Redis 行为状态与实时计数，随后投递 `ActionChangedEvent` 到 RabbitMQ。Worker 消费事件并调用仓储写入 MySQL 行为表和 `video_stat`，消费端依赖 `user_id + video_id + action_type` 与幂等键保持重复消息安全。
+
+核心键和队列：
+
+| 类型 | 名称 |
+| --- | --- |
+| 用户行为状态 | `interaction:action:v1:{user_id}:{video_id}:{action}` |
+| 实时计数 Hash | `video:stat:counter:v1:{video_id}` |
+| Feed 计数 JSON | `video:stat:v1:{video_id}` |
+| Exchange | `gcfeed.interaction` |
+| Queue | `gcfeed.interaction.action_changed` |
+| Routing key | `interaction.action_changed` |
+
+### 3.4 发表评论
 
 #### POST `/api/videos/{videoId}/comments`
 
@@ -160,7 +175,7 @@ apps/api/internal/interfaces/http/interaction/
 }
 ```
 
-### 3.4 评论列表
+### 3.5 评论列表
 
 #### GET `/api/videos/{videoId}/comments`
 
@@ -205,7 +220,7 @@ apps/api/internal/interfaces/http/interaction/
 | `created_at` | 当前页最后一条评论的创建时间 |
 | `comment_id` | 当前页最后一条评论ID |
 
-### 3.5 删除评论
+### 3.6 删除评论
 
 #### DELETE `/api/comments/{commentId}`
 

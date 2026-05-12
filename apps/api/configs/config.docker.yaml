@@ -14,3 +14,9 @@ redis:
   addr: "redis:6379"
   password: ""
   db: 0
+
+rabbitmq:
+  url: "amqp://guest:guest@rabbitmq:5672/"
+  interaction_exchange: "gcfeed.interaction"
+  action_changed_queue: "gcfeed.interaction.action_changed"
+  action_changed_routing: "interaction.action_changed"
