@@ -1748,7 +1748,6 @@ function UploadPage({ session, onNavigate }) {
 
 function normalizeRoute(pathname) {
   if (pathname === "/login") return "/auth";
-  if (pathname === "/feed") return "/timeline";
   if (pathname === "/me") return "/profile";
   if (/^\/users\/\d+$/.test(pathname)) return pathname;
   if (["/", "/auth", "/timeline", "/hotfeed", "/profile", "/upload"].includes(pathname)) return pathname;

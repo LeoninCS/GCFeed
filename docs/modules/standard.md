@@ -135,7 +135,7 @@ type User struct {}
 ```go
 type CreateResult struct {}
 type LoginResult struct {}
-type TimelineFeedResult struct {}
+type FeedResult struct {}
 type CommentListResult struct {}
 type ActionResult struct {}
 ```
@@ -211,7 +211,7 @@ Get
 Delete
 ListByAuthor
 GetTimelineFeed
-RefreshTimelineFeed
+RefreshFeed
 Like
 Unlike
 Favorite

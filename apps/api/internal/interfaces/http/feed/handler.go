@@ -21,8 +21,8 @@ func New(service *applicationfeed.Service) *Handler {
 	return &Handler{service: service}
 }
 
-// Timeline 读取指定 scene 的 Feed，cursor 和 limit 来自 query 参数。
-func (h *Handler) Timeline(c *gin.Context) {
+// ListFeedItems 读取指定 scene 的 Feed，cursor 和 limit 来自 query 参数。
+func (h *Handler) ListFeedItems(c *gin.Context) {
 	limit, err := parseLimit(c.Query("limit"))
 	if err != nil {
 		writeFeedError(c, err)
@@ -41,7 +41,7 @@ func (h *Handler) Timeline(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, timelineFeedResponseFromResult(result))
+	c.JSON(http.StatusOK, feedItemsResponseFromResult(result))
 }
 
 // Query 通过请求体接收复杂 Feed 查询参数，适合推荐上下文逐步扩展。
@@ -71,7 +71,7 @@ func (h *Handler) Query(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, timelineFeedResponseFromResult(result))
+	c.JSON(http.StatusOK, feedItemsResponseFromResult(result))
 }
 
 // Refresh 从第一页重新读取 Feed，适合下拉刷新语义。
@@ -82,13 +82,13 @@ func (h *Handler) Refresh(c *gin.Context) {
 		return
 	}
 
-	result, err := h.service.RefreshTimelineFeed(c.Request.Context(), limit)
+	result, err := h.service.RefreshFeed(c.Request.Context(), limit)
 	if err != nil {
 		writeFeedError(c, err)
 		return
 	}
 
-	c.JSON(http.StatusOK, timelineFeedResponseFromResult(result))
+	c.JSON(http.StatusOK, feedItemsResponseFromResult(result))
 }
 
 // parseLimit 只校验用户传入的 limit，默认值交给应用服务处理。
@@ -116,8 +116,8 @@ func parseBodyLimit(value *int) (int, error) {
 	return *value, nil
 }
 
-// timelineFeedResponseFromResult 把应用层 Feed 结果转换为 HTTP 响应结构。
-func timelineFeedResponseFromResult(result *applicationfeed.TimelineFeedResult) timelineFeedResponse {
+// feedItemsResponseFromResult 把应用层 Feed 结果转换为 HTTP 响应结构。
+func feedItemsResponseFromResult(result *applicationfeed.FeedResult) feedItemsResponse {
 	items := make([]feedItemResponse, 0, len(result.Items))
 	for _, item := range result.Items {
 		items = append(items, feedItemResponse{
@@ -135,7 +135,7 @@ func timelineFeedResponseFromResult(result *applicationfeed.TimelineFeedResult) 
 			PublishedAt:     item.PublishedAt,
 		})
 	}
-	return timelineFeedResponse{
+	return feedItemsResponse{
 		Scene:      string(result.Scene),
 		Items:      items,
 		NextCursor: result.NextCursor,

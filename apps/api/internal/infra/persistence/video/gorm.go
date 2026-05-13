@@ -37,25 +37,8 @@ func New(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
-// EnsureStats 确保每个视频都有一条统计记录，兼容旧表结构迁移后的数据。
+// EnsureStats 确保每个视频都有一条统计记录。
 func EnsureStats(db *gorm.DB) error {
-	hasLegacyColumns, err := hasLegacyVideoStatColumns(db)
-	if err != nil {
-		return err
-	}
-
-	if hasLegacyColumns {
-		// 旧版本统计字段在 video 表内，这里把历史计数迁移到 video_stat。
-		return db.Exec(`
-			INSERT INTO video_stat (video_id, like_count, comment_count, favorite_count, created_at, updated_at)
-			SELECT v.id, v.like_count, v.comment_count, v.favorite_count, NOW(), NOW()
-			FROM video AS v
-			LEFT JOIN video_stat AS vs ON vs.video_id = v.id
-			WHERE vs.video_id IS NULL
-		`).Error
-	}
-
-	// 新结构缺失统计记录时补零，保证后续互动计数更新有目标行。
 	return db.Exec(`
 		INSERT INTO video_stat (video_id, like_count, comment_count, favorite_count, created_at, updated_at)
 		SELECT v.id, 0, 0, 0, NOW(), NOW()
@@ -235,22 +218,6 @@ func restoreVideo(model videoWithStatModel) *domainvideo.Video {
 // videoWithStatSelect 统一视频详情查询字段，避免多个查询写重复 SQL 字段列表。
 func videoWithStatSelect() string {
 	return "v.id, v.author_id, v.title, v.description, v.media_url, v.cover_url, v.status, COALESCE(vs.like_count, 0) AS like_count, COALESCE(vs.comment_count, 0) AS comment_count, COALESCE(vs.favorite_count, 0) AS favorite_count, v.published_at, v.idempotency_key, v.created_at, v.updated_at"
-}
-
-// hasLegacyVideoStatColumns 检查旧版 video 表是否仍有计数字段。
-func hasLegacyVideoStatColumns(db *gorm.DB) (bool, error) {
-	var count int64
-	err := db.Raw(`
-		SELECT COUNT(*)
-		FROM information_schema.columns
-		WHERE table_schema = DATABASE()
-			AND table_name = 'video'
-			AND column_name IN ('like_count', 'comment_count', 'favorite_count')
-	`).Scan(&count).Error
-	if err != nil {
-		return false, err
-	}
-	return count == 3, nil
 }
 
 // idempotencyKeyPtr 将空幂等键存为 NULL，配合唯一索引允许普通创建多次执行。

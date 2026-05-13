@@ -178,9 +178,9 @@ sequenceDiagram
   S-->>H: 返回视频详情
   H-->>C: 201 Created
 
-  C->>R: GET /api/feed-items?cursor=...&limit=...
-  R->>H: Feed.Timeline
-  H->>S: GetTimelineFeed
+  C->>R: GET /api/feed-items?scene=timeline&cursor=...&limit=...
+  R->>H: Feed.ListFeedItems
+  H->>S: GetFeed(scene=timeline)
   S->>Repo: ListTimelinePage
   Repo->>DB: SELECT video_id, published_at
   DB-->>Repo: 返回轻量页
@@ -189,7 +189,7 @@ sequenceDiagram
   Repo->>DB: 批量回源缺失卡片和计数
   Repo-->>S: 返回缺失数据
   S-->>H: 返回 items + next_cursor + has_more
-  H-->>C: 返回 Timeline Feed
+  H-->>C: 返回 timeline feed items
 
   C->>R: PUT /api/videos/{videoId}/like
   R->>H: Interaction.Like
@@ -198,12 +198,12 @@ sequenceDiagram
   S->>Redis: ZINCRBY feed:hot:minute:v1:{minute}
 
   C->>R: GET /api/feed-items?scene=hot&limit=10
-  R->>H: Feed.Timeline
+  R->>H: Feed.ListFeedItems
   H->>S: GetFeed(scene=hot)
   S->>Redis: ZUNIONSTORE 最近 60 个分钟桶
   S->>Redis: ZREVRANGE 热榜窗口
   S-->>H: 返回一小时热榜 items + cursor
-  H-->>C: 返回 Hot Feed
+  H-->>C: 返回 hot feed items
 ```
 
 ## 4. 数据模型
@@ -314,5 +314,5 @@ flowchart TB
 - 当前代码以 Go API 单体承载账户、视频、Feed 与上传能力，内部按接口层、应用层、领域层、基础设施层组织。
 - 对外接口统一挂载在 `/api/*`，静态文件通过 `/uploads/*` 访问，健康检查使用 `/health`。
 - 数据持久化使用 MySQL，GORM 自动迁移 `account`、`video`、`video_stat` 三张表。
-- Feed 当前采用 Timeline 策略，按 `published_at DESC, id DESC` 排序，并通过 Base64 游标分页。
+- Feed 通过 `scene` 分发策略：`timeline` 按 `published_at DESC, id DESC` 排序，`hot` 按最近 60 分钟互动热度排序，并通过 Base64 游标分页。
 - 推荐、互动、审核、消息、治理和监控模块作为演进边界保留，后续可从单体内模块逐步扩展为异步事件和独立服务。

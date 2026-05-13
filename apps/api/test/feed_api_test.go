@@ -424,7 +424,7 @@ func TestHotFeedWindowCache(t *testing.T) {
 func TestTimelineFeedCache(t *testing.T) {
 	repo := newMemoryFeedRepo(seedFeedItems())
 	cache := newMemoryFeedCache()
-	router := newFeedRouterWithService(applicationfeed.New(repo, applicationfeed.WithTimelineCache(cache)))
+	router := newFeedRouterWithService(applicationfeed.New(repo, applicationfeed.WithFeedCache(cache)))
 
 	firstResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=timeline&limit=2", "", "")
 	requireStatus(t, firstResponse, http.StatusOK)
@@ -474,7 +474,7 @@ func newFeedRouterWithService(service *applicationfeed.Service) *gin.Engine {
 	handler := interfaceshttpfeed.New(service)
 
 	api := router.Group("/api")
-	api.GET("/feed-items", handler.Timeline)
+	api.GET("/feed-items", handler.ListFeedItems)
 	api.POST("/feed-queries", handler.Query)
 
 	return router

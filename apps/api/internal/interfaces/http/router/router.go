@@ -148,7 +148,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	uploads.POST("", uploadHandler.Create)
 
 	// Feed 暴露为条目集合，客户端通过游标和 limit 控制分页。
-	api.GET("/feed-items", optionalAuthMiddleware, feedHandler.Timeline)
+	api.GET("/feed-items", optionalAuthMiddleware, feedHandler.ListFeedItems)
 	api.POST("/feed-queries", optionalAuthMiddleware, feedHandler.Query)
 	// 删除评论只需要评论自身 ID，所以放在顶层 comments 资源下。
 	api.DELETE("/comments/:commentId", authMiddleware, interactionHandler.DeleteComment)

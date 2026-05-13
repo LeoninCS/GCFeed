@@ -10,8 +10,8 @@ type feedQueryRequest struct {
 	ClientContext map[string]string `json:"context"`
 }
 
-// timelineFeedResponse 是 Feed 游标分页响应。
-type timelineFeedResponse struct {
+// feedItemsResponse 是 Feed 游标分页响应。
+type feedItemsResponse struct {
 	Scene      string             `json:"scene"`
 	Items      []feedItemResponse `json:"items"`
 	NextCursor string             `json:"next_cursor"`

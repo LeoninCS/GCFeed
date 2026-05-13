@@ -69,9 +69,6 @@ type FeedCache interface {
 	ListHotWindowPage(ctx context.Context, windowEnd time.Time, offset int, limit int) ([]*domainfeed.FeedPageItem, error)
 }
 
-// TimelineFeedResult 兼容原有时间线用例命名。
-type TimelineFeedResult = FeedResult
-
 // Strategy 定义单个 Feed 场景的读取策略。
 type Strategy interface {
 	Scene() domainfeed.Scene
@@ -128,16 +125,6 @@ func WithFeedCache(cache FeedCache) Option {
 	}
 }
 
-// WithTimelineCache 保留原有装配入口，为时间线 Feed 启用读缓存。
-func WithTimelineCache(cache FeedCache) Option {
-	return func(s *Service) {
-		strategy, ok := s.strategies[domainfeed.SceneTimeline].(*TimelineStrategy)
-		if ok {
-			strategy.cache = cache
-		}
-	}
-}
-
 // New 注入 Feed 仓储并注册默认时间线策略。
 func New(repo domainfeed.Repository, options ...Option) *Service {
 	service := &Service{
@@ -176,7 +163,7 @@ func (s *Service) GetFeed(ctx context.Context, req FeedRequest) (*FeedResult, er
 }
 
 // GetTimelineFeed 使用 cursor+limit 读取时间线 Feed。
-func (s *Service) GetTimelineFeed(ctx context.Context, cursor string, limit int) (*TimelineFeedResult, error) {
+func (s *Service) GetTimelineFeed(ctx context.Context, cursor string, limit int) (*FeedResult, error) {
 	return s.GetFeed(ctx, FeedRequest{
 		Scene:  domainfeed.SceneTimeline,
 		Cursor: cursor,
@@ -362,8 +349,8 @@ func (s *HotStrategy) listPageFromRepo(ctx context.Context, parsedCursor *domain
 	}, nil
 }
 
-// RefreshTimelineFeed 从第一页重新加载 Feed，适合下拉刷新场景。
-func (s *Service) RefreshTimelineFeed(ctx context.Context, limit int) (*TimelineFeedResult, error) {
+// RefreshFeed 从第一页重新加载默认 Feed，适合下拉刷新场景。
+func (s *Service) RefreshFeed(ctx context.Context, limit int) (*FeedResult, error) {
 	return s.GetTimelineFeed(ctx, "", limit)
 }
 
