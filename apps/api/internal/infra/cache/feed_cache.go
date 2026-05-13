@@ -24,6 +24,7 @@ const actionStatJSONTTL = 15 * time.Second
 
 type redisWatchCmdable interface {
 	redis.Cmdable
+	Pipeline() redis.Pipeliner
 	Watch(ctx context.Context, fn func(*redis.Tx) error, keys ...string) error
 }
 
@@ -93,6 +94,9 @@ func (c *FeedCache) GetCards(ctx context.Context, videoIDs []int64) (map[int64]*
 
 // SetCards 批量写入视频卡片缓存。
 func (c *FeedCache) SetCards(ctx context.Context, cards map[int64]*domainfeed.FeedCard, ttl time.Duration) error {
+	pipe := c.client.Pipeline()
+	queued := false
+
 	for _, card := range cards {
 		if card == nil || card.VideoID <= 0 {
 			continue
@@ -101,11 +105,14 @@ func (c *FeedCache) SetCards(ctx context.Context, cards map[int64]*domainfeed.Fe
 		if err != nil {
 			return err
 		}
-		if err := c.client.Set(ctx, feedCardKey(card.VideoID), content, ttl).Err(); err != nil {
-			return err
-		}
+		pipe.Set(ctx, feedCardKey(card.VideoID), content, ttl)
+		queued = true
 	}
-	return nil
+	if !queued {
+		return nil
+	}
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 // GetStats 批量读取视频计数缓存。
@@ -138,6 +145,9 @@ func (c *FeedCache) GetStats(ctx context.Context, videoIDs []int64) (map[int64]*
 
 // SetStats 批量写入视频计数缓存。
 func (c *FeedCache) SetStats(ctx context.Context, stats map[int64]*domainfeed.FeedStat, ttl time.Duration) error {
+	pipe := c.client.Pipeline()
+	queued := false
+
 	for _, stat := range stats {
 		if stat == nil || stat.VideoID <= 0 {
 			continue
@@ -146,11 +156,14 @@ func (c *FeedCache) SetStats(ctx context.Context, stats map[int64]*domainfeed.Fe
 		if err != nil {
 			return err
 		}
-		if err := c.client.Set(ctx, feedStatKey(stat.VideoID), content, ttl).Err(); err != nil {
-			return err
-		}
+		pipe.Set(ctx, feedStatKey(stat.VideoID), content, ttl)
+		queued = true
 	}
-	return nil
+	if !queued {
+		return nil
+	}
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 // AddHotScore 把一次互动热度写入 1 分钟粒度的热榜桶。
@@ -178,19 +191,36 @@ func (c *FeedCache) ListHotWindowPage(ctx context.Context, windowEnd time.Time, 
 
 	windowEnd = windowEnd.UTC().Truncate(time.Minute)
 	windowKey := hotWindowKey(windowEnd)
+	exists, err := c.client.Exists(ctx, windowKey).Result()
+	if err != nil {
+		return nil, err
+	}
+	if exists == 0 {
+		if err := c.rebuildHotWindow(ctx, windowKey, windowEnd); err != nil {
+			return nil, err
+		}
+	}
+
+	return c.listHotWindowPage(ctx, windowKey, offset, limit)
+}
+
+func (c *FeedCache) rebuildHotWindow(ctx context.Context, windowKey string, windowEnd time.Time) error {
 	if _, err := c.client.ZUnionStore(ctx, windowKey, &redis.ZStore{
 		Keys:      hotWindowMinuteKeys(windowEnd),
 		Aggregate: "SUM",
 	}).Result(); err != nil {
-		return nil, err
-	}
-	if err := c.client.Expire(ctx, windowKey, hotWindowCacheTTL).Err(); err != nil {
-		return nil, err
-	}
-	if err := c.client.ZRemRangeByScore(ctx, windowKey, "-inf", "0").Err(); err != nil {
-		return nil, err
+		return err
 	}
 
+	pipe := c.client.Pipeline()
+	pipe.ZRemRangeByScore(ctx, windowKey, "-inf", "0")
+	pipe.Expire(ctx, windowKey, hotWindowCacheTTL)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+func (c *FeedCache) listHotWindowPage(ctx context.Context, windowKey string, offset int, limit int) ([]*domainfeed.FeedPageItem, error) {
+	items := []*domainfeed.FeedPageItem{}
 	values, err := c.client.ZRevRangeWithScores(ctx, windowKey, int64(offset), int64(offset+limit-1)).Result()
 	if err != nil {
 		return nil, err
