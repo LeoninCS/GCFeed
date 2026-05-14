@@ -323,10 +323,7 @@ func (c *FeedCache) SetActionState(ctx context.Context, userID int64, videoID in
 			}
 		}
 
-		baseStat, err := actionStatBaseInit(ctx, tx, videoID, initialStat)
-		if err != nil {
-			return err
-		}
+		baseStat := actionStatBaseInit(videoID, initialStat)
 
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 			pipe.HSet(ctx, actionKey, map[string]any{
@@ -396,12 +393,12 @@ func actionStatWithPresence(ctx context.Context, client redisActionStatReader, c
 		applyActionStatFields(stat, values)
 		found = true
 	} else {
-		legacyStat, ok, err := actionStatFallback(ctx, client, interactionStatCounterLegacyKey(videoID), jsonKey, videoID, initialStat)
+		fallbackStat, ok, err := actionStatFallback(ctx, client, jsonKey, videoID, initialStat)
 		if err != nil {
 			return nil, false, err
 		}
 		if ok {
-			stat = legacyStat
+			stat = fallbackStat
 			found = true
 		}
 	}
@@ -416,17 +413,8 @@ func actionStatWithPresence(ctx context.Context, client redisActionStatReader, c
 	return stat, true, nil
 }
 
-func actionStatFallback(ctx context.Context, client redisActionStatReader, legacyCounterKey string, jsonKey string, videoID int64, initialStat *domaininteraction.VideoStat) (*domainfeed.FeedStat, bool, error) {
+func actionStatFallback(ctx context.Context, client redisActionStatReader, jsonKey string, videoID int64, initialStat *domaininteraction.VideoStat) (*domainfeed.FeedStat, bool, error) {
 	stat := &domainfeed.FeedStat{VideoID: videoID}
-	values, err := client.HGetAll(ctx, legacyCounterKey).Result()
-	if err != nil {
-		return nil, false, err
-	}
-	if len(values) > 0 {
-		applyActionStatFields(stat, values)
-		return stat, true, nil
-	}
-
 	content, err := client.Get(ctx, jsonKey).Bytes()
 	if err == redis.Nil {
 		if initialStat != nil {
@@ -449,23 +437,11 @@ func actionStatFallback(ctx context.Context, client redisActionStatReader, legac
 	return stat, true, nil
 }
 
-func actionStatBaseInit(ctx context.Context, client redisActionStatReader, videoID int64, initialStat *domaininteraction.VideoStat) (*domaininteraction.VideoStat, error) {
-	values, err := client.HGetAll(ctx, interactionStatCounterLegacyKey(videoID)).Result()
-	if err != nil {
-		return nil, err
-	}
-	if len(values) > 0 {
-		return &domaininteraction.VideoStat{
-			VideoID:       videoID,
-			LikeCount:     actionStatFieldInt(values, "like_count"),
-			CommentCount:  actionStatFieldInt(values, "comment_count"),
-			FavoriteCount: actionStatFieldInt(values, "favorite_count"),
-		}, nil
-	}
+func actionStatBaseInit(videoID int64, initialStat *domaininteraction.VideoStat) *domaininteraction.VideoStat {
 	if initialStat != nil {
-		return initialStat, nil
+		return initialStat
 	}
-	return &domaininteraction.VideoStat{VideoID: videoID}, nil
+	return &domaininteraction.VideoStat{VideoID: videoID}
 }
 
 func queueActionStatBaseInit(ctx context.Context, pipe redis.Pipeliner, counterBaseKey string, initialStat *domaininteraction.VideoStat) {
@@ -582,10 +558,6 @@ func interactionActionKey(userID int64, videoID int64, actionType string) string
 
 func interactionStatCounterKey(videoID int64) string {
 	return fmt.Sprintf("video:stat:counter:v1:%d", videoID)
-}
-
-func interactionStatCounterLegacyKey(videoID int64) string {
-	return interactionStatCounterKey(videoID)
 }
 
 func interactionStatCounterBaseKey(videoID int64) string {
