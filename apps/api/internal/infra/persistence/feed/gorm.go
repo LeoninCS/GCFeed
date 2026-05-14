@@ -2,6 +2,7 @@ package infrafeed
 
 import (
 	domainfeed "GCFeed/internal/domain/feed"
+	domainrelation "GCFeed/internal/domain/relation"
 	domainvideo "GCFeed/internal/domain/video"
 	"context"
 	"fmt"
@@ -92,6 +93,55 @@ func (r *Repository) ListHotPage(ctx context.Context, cursor *domainfeed.HotCurs
 		return nil, err
 	}
 
+	return feedPageItemsFromModels(models), nil
+}
+
+// ListFollowingPage 使用推拉混合模式读取关注流：普通作者读 inbox，大 V 作者按关注关系拉取。
+func (r *Repository) ListFollowingPage(ctx context.Context, viewerID int64, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedPageItem, error) {
+	var models []domainfeed.FeedPageItem
+	query := `
+SELECT merged.video_id, merged.published_at
+FROM (
+	SELECT v.id AS video_id, v.published_at AS published_at
+	FROM feed_inbox AS fi
+	JOIN video AS v ON v.id = fi.video_id
+	JOIN user_follow AS f ON f.user_id = fi.user_id AND f.target_user_id = v.author_id
+	WHERE fi.user_id = ? AND f.status = ? AND v.status = ? AND v.published_at IS NOT NULL
+	UNION
+	SELECT v.id AS video_id, v.published_at AS published_at
+	FROM video AS v
+	JOIN user_follow AS f ON f.target_user_id = v.author_id
+	JOIN user_relation_stat AS rs ON rs.user_id = v.author_id
+	WHERE f.user_id = ? AND f.status = ? AND rs.follower_count >= ? AND v.status = ? AND v.published_at IS NOT NULL
+) AS merged`
+	args := []any{
+		viewerID,
+		domainrelation.FollowStatusActive,
+		domainvideo.StatusPublished,
+		viewerID,
+		domainrelation.FollowStatusActive,
+		domainfeed.BigCreatorFollowerThreshold,
+		domainvideo.StatusPublished,
+	}
+
+	if cursor != nil {
+		query += `
+WHERE (merged.published_at < ? OR (merged.published_at = ? AND merged.video_id < ?))`
+		args = append(args, cursor.PublishedAt, cursor.PublishedAt, cursor.VideoID)
+	}
+
+	query += `
+ORDER BY merged.published_at DESC, merged.video_id DESC
+LIMIT ?`
+	args = append(args, limit)
+
+	err := r.db.WithContext(ctx).
+		Raw(query, args...).
+		Scan(&models).
+		Error
+	if err != nil {
+		return nil, err
+	}
 	return feedPageItemsFromModels(models), nil
 }
 

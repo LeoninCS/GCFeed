@@ -91,6 +91,12 @@ type HotStrategy struct {
 	cache FeedCache
 }
 
+// FollowingStrategy 使用推拉混合模式读取关注流。
+type FollowingStrategy struct {
+	repo  domainfeed.Repository
+	cache FeedCache
+}
+
 type timelineCursorPayload struct {
 	PublishedAt string `json:"published_at"`
 	VideoID     int64  `json:"video_id"`
@@ -120,6 +126,8 @@ func WithFeedCache(cache FeedCache) Option {
 				typed.cache = cache
 			case *HotStrategy:
 				typed.cache = cache
+			case *FollowingStrategy:
+				typed.cache = cache
 			}
 		}
 	}
@@ -133,6 +141,7 @@ func New(repo domainfeed.Repository, options ...Option) *Service {
 	}
 	service.RegisterStrategy(NewTimelineStrategy(domainfeed.SceneTimeline, repo))
 	service.RegisterStrategy(NewHotStrategy(repo))
+	service.RegisterStrategy(NewFollowingStrategy(repo))
 	for _, option := range options {
 		option(service)
 	}
@@ -343,6 +352,71 @@ func (s *HotStrategy) listPageFromRepo(ctx context.Context, parsedCursor *domain
 
 	return &FeedPage{
 		Scene:      domainfeed.SceneHot,
+		Items:      items,
+		NextCursor: nextCursor,
+		HasMore:    hasMore,
+	}, nil
+}
+
+// NewFollowingStrategy 创建关注流推拉混合策略。
+func NewFollowingStrategy(repo domainfeed.Repository) *FollowingStrategy {
+	return &FollowingStrategy{repo: repo}
+}
+
+// Scene 返回关注流场景。
+func (s *FollowingStrategy) Scene() domainfeed.Scene {
+	return domainfeed.SceneFollowing
+}
+
+// List 根据当前登录用户读取关注流。
+func (s *FollowingStrategy) List(ctx context.Context, req FeedRequest) (*FeedResult, error) {
+	if req.ViewerID <= 0 {
+		return nil, domainfeed.ErrViewerRequired
+	}
+	parsedCursor, err := parseTimelineCursor(req.Cursor)
+	if err != nil {
+		return nil, err
+	}
+	limit := normalizeLimit(req.Limit)
+
+	page, err := s.listPageFromRepo(ctx, req.ViewerID, parsedCursor, limit)
+	if err != nil {
+		return nil, err
+	}
+	items, err := assembleFeedItems(ctx, s.repo, s.cache, page.Items)
+	if err != nil {
+		return nil, ErrLoadFeedFailed
+	}
+
+	return &FeedResult{
+		Scene:      domainfeed.SceneFollowing,
+		Items:      items,
+		NextCursor: page.NextCursor,
+		HasMore:    page.HasMore,
+	}, nil
+}
+
+func (s *FollowingStrategy) listPageFromRepo(ctx context.Context, viewerID int64, parsedCursor *domainfeed.TimelineCursor, limit int) (*FeedPage, error) {
+	items, err := s.repo.ListFollowingPage(ctx, viewerID, parsedCursor, limit+1)
+	if err != nil {
+		return nil, ErrLoadFeedFailed
+	}
+
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+
+	nextCursor := ""
+	if len(items) > 0 {
+		nextCursor = encodeTimelineCursor(&domainfeed.TimelineCursor{
+			PublishedAt: items[len(items)-1].PublishedAt,
+			VideoID:     items[len(items)-1].VideoID,
+		})
+	}
+
+	return &FeedPage{
+		Scene:      domainfeed.SceneFollowing,
 		Items:      items,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,

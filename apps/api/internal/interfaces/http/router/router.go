@@ -46,6 +46,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 		&infraaccount.UserModel{},
 		&infravideo.VideoModel{},
 		&infravideo.VideoStatModel{},
+		&infrafeed.InboxModel{},
 		&infrainteraction.ActionModel{},
 		&infrainteraction.CommentModel{},
 		&infrarelation.FollowModel{},

@@ -10,7 +10,9 @@ import (
 
 	applicationfeed "GCFeed/internal/application/feed"
 	domainfeed "GCFeed/internal/domain/feed"
+	infrajwt "GCFeed/internal/infra/jwt"
 	interfaceshttpfeed "GCFeed/internal/interfaces/http/feed"
+	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -39,12 +41,16 @@ type feedItemAPIResponse struct {
 
 // memoryFeedRepo 是 Feed 测试用内存仓储，模拟时间线排序和游标分页。
 type memoryFeedRepo struct {
-	mu            sync.Mutex
-	items         []*domainfeed.FeedItem
-	timelineCalls int
-	hotCalls      int
-	cardCalls     int
-	statCalls     int
+	mu             sync.Mutex
+	items          []*domainfeed.FeedItem
+	timelineCalls  int
+	hotCalls       int
+	cardCalls      int
+	statCalls      int
+	following      map[int64]map[int64]struct{}
+	followerCounts map[int64]int
+	inbox          map[int64]map[int64]struct{}
+	followingCalls int
 }
 
 type memoryFeedCache struct {
@@ -56,7 +62,12 @@ type memoryFeedCache struct {
 }
 
 func newMemoryFeedRepo(items []*domainfeed.FeedItem) *memoryFeedRepo {
-	return &memoryFeedRepo{items: items}
+	return &memoryFeedRepo{
+		items:          items,
+		following:      map[int64]map[int64]struct{}{},
+		followerCounts: map[int64]int{},
+		inbox:          map[int64]map[int64]struct{}{},
+	}
 }
 
 func newMemoryFeedCache() *memoryFeedCache {
@@ -89,6 +100,36 @@ func (r *memoryFeedRepo) HotCalls() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.hotCalls
+}
+
+func (r *memoryFeedRepo) FollowingCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.followingCalls
+}
+
+func (r *memoryFeedRepo) FollowForTest(viewerID int64, authorID int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.following[viewerID] == nil {
+		r.following[viewerID] = map[int64]struct{}{}
+	}
+	r.following[viewerID][authorID] = struct{}{}
+}
+
+func (r *memoryFeedRepo) SetFollowerCountForTest(authorID int64, followerCount int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.followerCounts[authorID] = followerCount
+}
+
+func (r *memoryFeedRepo) PushToInboxForTest(viewerID int64, videoID int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.inbox[viewerID] == nil {
+		r.inbox[viewerID] = map[int64]struct{}{}
+	}
+	r.inbox[viewerID][videoID] = struct{}{}
 }
 
 // ListTimelinePage 模拟真实仓储的 published_at DESC, video_id DESC 排序。
@@ -252,6 +293,44 @@ func (r *memoryFeedRepo) ListHotPage(ctx context.Context, cursor *domainfeed.Hot
 	return items[:limit], nil
 }
 
+// ListFollowingPage 模拟关注流推拉混合：普通作者读 inbox，大 V 作者按关注关系拉取。
+func (r *memoryFeedRepo) ListFollowingPage(ctx context.Context, viewerID int64, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedPageItem, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.followingCalls++
+
+	followedAuthors := r.following[viewerID]
+	inboxVideos := r.inbox[viewerID]
+	seen := map[int64]struct{}{}
+	items := make([]*domainfeed.FeedPageItem, 0, len(r.items))
+	for _, item := range r.items {
+		_, followed := followedAuthors[item.AuthorID]
+		_, pushed := inboxVideos[item.VideoID]
+		pulled := followed && r.followerCounts[item.AuthorID] >= domainfeed.BigCreatorFollowerThreshold
+		if (!pushed && !pulled) || !followed {
+			continue
+		}
+		if cursor == nil || item.PublishedAt.Before(cursor.PublishedAt) || (item.PublishedAt.Equal(cursor.PublishedAt) && item.VideoID < cursor.VideoID) {
+			if _, ok := seen[item.VideoID]; ok {
+				continue
+			}
+			seen[item.VideoID] = struct{}{}
+			items = append(items, feedPageItemFromFeedItem(item))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].PublishedAt.Equal(items[j].PublishedAt) {
+			return items[i].VideoID > items[j].VideoID
+		}
+		return items[i].PublishedAt.After(items[j].PublishedAt)
+	})
+
+	if limit > len(items) {
+		limit = len(items)
+	}
+	return items[:limit], nil
+}
+
 func (r *memoryFeedRepo) BatchGetFeedCards(ctx context.Context, videoIDs []int64) (map[int64]*domainfeed.FeedCard, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -351,8 +430,48 @@ func TestFeedSceneQuery(t *testing.T) {
 		t.Fatalf("unexpected query response: %+v", queryFeed)
 	}
 
-	unknownSceneResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=following&limit=1", "", "")
-	requireStatus(t, unknownSceneResponse, http.StatusBadRequest)
+	followingResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=following&limit=1", "", "")
+	requireStatus(t, followingResponse, http.StatusUnauthorized)
+}
+
+// TestFollowingFeedScene 覆盖关注流推拉混合：普通作者来自 inbox，大 V 作者来自拉取结果。
+func TestFollowingFeedScene(t *testing.T) {
+	repo := newMemoryFeedRepo(seedFollowingFeedItems())
+	repo.FollowForTest(42, 100)
+	repo.FollowForTest(42, 200)
+	repo.SetFollowerCountForTest(100, domainfeed.BigCreatorFollowerThreshold)
+	repo.SetFollowerCountForTest(200, domainfeed.BigCreatorFollowerThreshold-1)
+	repo.SetFollowerCountForTest(300, domainfeed.BigCreatorFollowerThreshold)
+	repo.PushToInboxForTest(42, 2)
+	router, jwtManager := newFeedRouterWithServiceAndJWT(t, applicationfeed.New(repo))
+	token := signTestToken(t, jwtManager, 42)
+
+	firstPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=following&limit=2", "", token)
+	requireStatus(t, firstPageResponse, http.StatusOK)
+
+	var firstPage feedAPIResponse
+	decodeJSON(t, firstPageResponse, &firstPage)
+	if firstPage.Scene != string(domainfeed.SceneFollowing) {
+		t.Fatalf("unexpected following feed scene: %+v", firstPage)
+	}
+	if len(firstPage.Items) != 2 || firstPage.Items[0].VideoID != 4 || firstPage.Items[1].VideoID != 2 || !firstPage.HasMore {
+		t.Fatalf("unexpected following first page response: %+v", firstPage)
+	}
+	if firstPage.NextCursor == "" {
+		t.Fatalf("expected following cursor")
+	}
+
+	secondPageResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=following&limit=2&cursor="+firstPage.NextCursor, "", token)
+	requireStatus(t, secondPageResponse, http.StatusOK)
+
+	var secondPage feedAPIResponse
+	decodeJSON(t, secondPageResponse, &secondPage)
+	if len(secondPage.Items) != 1 || secondPage.Items[0].VideoID != 1 || secondPage.HasMore {
+		t.Fatalf("unexpected following second page response: %+v", secondPage)
+	}
+	if repo.FollowingCalls() != 2 {
+		t.Fatalf("unexpected following repo calls: %d", repo.FollowingCalls())
+	}
 }
 
 // TestHotFeedScene 覆盖热榜 Feed 排序和游标分页。
@@ -480,6 +599,26 @@ func newFeedRouterWithService(service *applicationfeed.Service) *gin.Engine {
 	return router
 }
 
+func newFeedRouterWithServiceAndJWT(t *testing.T, service *applicationfeed.Service) (*gin.Engine, *infrajwt.Manager) {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	jwtManager, err := infrajwt.NewManager("test-secret", "15m")
+	if err != nil {
+		t.Fatalf("new jwt manager: %v", err)
+	}
+
+	handler := interfaceshttpfeed.New(service)
+	optionalAuthMiddleware := interfaceshttpmiddleware.NewOptionalJWTAuth(jwtManager)
+
+	api := router.Group("/api")
+	api.GET("/feed-items", optionalAuthMiddleware, handler.ListFeedItems)
+	api.POST("/feed-queries", optionalAuthMiddleware, handler.Query)
+
+	return router, jwtManager
+}
+
 // seedFeedItems 准备三条不同发布时间的视频，用于验证排序和分页。
 func seedFeedItems() []*domainfeed.FeedItem {
 	base := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
@@ -497,6 +636,16 @@ func seedHotFeedItems() []*domainfeed.FeedItem {
 		domainfeed.RestoreFeedItem(1, 10, "old author", "https://example.com/avatar-1.jpg", "old hot video", "old hot description", "https://example.com/1.mp4", "https://example.com/1.jpg", 20, 30, 10, base.Add(-2*time.Hour)),
 		domainfeed.RestoreFeedItem(2, 20, "middle author", "https://example.com/avatar-2.jpg", "middle warm video", "middle warm description", "https://example.com/2.mp4", "https://example.com/2.jpg", 10, 1, 0, base.Add(-1*time.Hour)),
 		domainfeed.RestoreFeedItem(3, 30, "new author", "https://example.com/avatar-3.jpg", "new quiet video", "new quiet description", "https://example.com/3.mp4", "https://example.com/3.jpg", 0, 0, 0, base),
+	}
+}
+
+func seedFollowingFeedItems() []*domainfeed.FeedItem {
+	base := time.Date(2026, 5, 3, 12, 0, 0, 0, time.UTC)
+	return []*domainfeed.FeedItem{
+		domainfeed.RestoreFeedItem(1, 100, "big creator", "https://example.com/a100.jpg", "big old", "big old description", "https://example.com/1.mp4", "https://example.com/1.jpg", 1, 0, 0, base.Add(-3*time.Hour)),
+		domainfeed.RestoreFeedItem(2, 200, "small creator", "https://example.com/a200.jpg", "small middle", "small middle description", "https://example.com/2.mp4", "https://example.com/2.jpg", 2, 0, 0, base.Add(-2*time.Hour)),
+		domainfeed.RestoreFeedItem(3, 300, "unfollowed creator", "https://example.com/a300.jpg", "unfollowed", "unfollowed description", "https://example.com/3.mp4", "https://example.com/3.jpg", 3, 0, 0, base.Add(-1*time.Hour)),
+		domainfeed.RestoreFeedItem(4, 100, "big creator", "https://example.com/a100.jpg", "big new", "big new description", "https://example.com/4.mp4", "https://example.com/4.jpg", 4, 0, 0, base),
 	}
 }
 

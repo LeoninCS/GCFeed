@@ -145,6 +145,10 @@ func feedItemsResponseFromResult(result *applicationfeed.FeedResult) feedItemsRe
 
 // writeFeedError 统一 Feed 接口错误响应。
 func writeFeedError(c *gin.Context, err error) {
+	if errors.Is(err, domainfeed.ErrViewerRequired) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
 	if isBadRequestError(err) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
