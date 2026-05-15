@@ -96,53 +96,78 @@ func (r *Repository) ListHotPage(ctx context.Context, cursor *domainfeed.HotCurs
 	return feedPageItemsFromModels(models), nil
 }
 
-// ListFollowingPage 使用推拉混合模式读取关注流：普通作者读 inbox，大 V 作者按关注关系拉取。
+// ListFollowingPage 按关注关系读取关注流，作为 Redis 关注索引冷启动和缺失时的真相源兜底。
 func (r *Repository) ListFollowingPage(ctx context.Context, viewerID int64, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedPageItem, error) {
 	var models []domainfeed.FeedPageItem
-	query := `
-SELECT merged.video_id, merged.published_at
-FROM (
-	SELECT v.id AS video_id, v.published_at AS published_at
-	FROM feed_inbox AS fi
-	JOIN video AS v ON v.id = fi.video_id
-	JOIN user_follow AS f ON f.user_id = fi.user_id AND f.target_user_id = v.author_id
-	WHERE fi.user_id = ? AND f.status = ? AND v.status = ? AND v.published_at IS NOT NULL
-	UNION
-	SELECT v.id AS video_id, v.published_at AS published_at
-	FROM video AS v
-	JOIN user_follow AS f ON f.target_user_id = v.author_id
-	JOIN user_relation_stat AS rs ON rs.user_id = v.author_id
-	WHERE f.user_id = ? AND f.status = ? AND rs.follower_count >= ? AND v.status = ? AND v.published_at IS NOT NULL
-) AS merged`
-	args := []any{
-		viewerID,
-		domainrelation.FollowStatusActive,
-		domainvideo.StatusPublished,
-		viewerID,
-		domainrelation.FollowStatusActive,
-		domainfeed.BigCreatorFollowerThreshold,
-		domainvideo.StatusPublished,
-	}
+	query := r.db.WithContext(ctx).
+		Table("video AS v").
+		Select("v.id AS video_id, v.author_id, v.published_at").
+		Joins("JOIN user_follow AS f ON f.target_user_id = v.author_id").
+		Where("f.user_id = ? AND f.status = ? AND v.status = ? AND v.published_at IS NOT NULL", viewerID, domainrelation.FollowStatusActive, domainvideo.StatusPublished)
 
 	if cursor != nil {
-		query += `
-WHERE (merged.published_at < ? OR (merged.published_at = ? AND merged.video_id < ?))`
-		args = append(args, cursor.PublishedAt, cursor.PublishedAt, cursor.VideoID)
+		query = query.Where(
+			"(v.published_at < ? OR (v.published_at = ? AND v.id < ?))",
+			cursor.PublishedAt,
+			cursor.PublishedAt,
+			cursor.VideoID,
+		)
 	}
 
-	query += `
-ORDER BY merged.published_at DESC, merged.video_id DESC
-LIMIT ?`
-	args = append(args, limit)
-
-	err := r.db.WithContext(ctx).
-		Raw(query, args...).
+	err := query.
+		Order("v.published_at DESC").
+		Order("v.id DESC").
+		Limit(limit).
 		Scan(&models).
 		Error
 	if err != nil {
 		return nil, err
 	}
 	return feedPageItemsFromModels(models), nil
+}
+
+func (r *Repository) ListFollowingPullAuthorIDs(ctx context.Context, viewerID int64) ([]int64, error) {
+	var authorIDs []int64
+	err := r.db.WithContext(ctx).
+		Table("user_follow AS f").
+		Select("f.target_user_id").
+		Joins("JOIN user_relation_stat AS rs ON rs.user_id = f.target_user_id").
+		Where("f.user_id = ? AND f.status = ? AND rs.follower_count >= ?", viewerID, domainrelation.FollowStatusActive, domainfeed.BigCreatorFollowerThreshold).
+		Order("f.target_user_id ASC").
+		Scan(&authorIDs).
+		Error
+	return authorIDs, err
+}
+
+func (r *Repository) CountFollowers(ctx context.Context, authorID int64) (int, error) {
+	var count int
+	err := r.db.WithContext(ctx).
+		Table("user_relation_stat").
+		Select("follower_count").
+		Where("user_id = ?", authorID).
+		Take(&count).
+		Error
+	if err == gorm.ErrRecordNotFound {
+		return 0, nil
+	}
+	return count, err
+}
+
+func (r *Repository) ListFollowerIDs(ctx context.Context, authorID int64, cursor int64, limit int) ([]int64, error) {
+	var followerIDs []int64
+	query := r.db.WithContext(ctx).
+		Table("user_follow").
+		Select("user_id").
+		Where("target_user_id = ? AND status = ?", authorID, domainrelation.FollowStatusActive)
+	if cursor > 0 {
+		query = query.Where("user_id > ?", cursor)
+	}
+	err := query.
+		Order("user_id ASC").
+		Limit(limit).
+		Scan(&followerIDs).
+		Error
+	return followerIDs, err
 }
 
 // BatchGetFeedCards 批量读取视频卡片展示字段，缓存缺失时由应用层调用。
@@ -198,14 +223,14 @@ func (r *Repository) BatchGetFeedStats(ctx context.Context, videoIDs []int64) (m
 func (r *Repository) basePageQuery(ctx context.Context) *gorm.DB {
 	return r.db.WithContext(ctx).
 		Table("video AS v").
-		Select("v.id AS video_id, v.published_at").
+		Select("v.id AS video_id, v.author_id, v.published_at").
 		Where("v.status = ? AND v.published_at IS NOT NULL", domainvideo.StatusPublished)
 }
 
 func (r *Repository) baseHotPageQuery(ctx context.Context) *gorm.DB {
 	return r.db.WithContext(ctx).
 		Table("video AS v").
-		Select("v.id AS video_id, ("+hotScoreExpression+") AS hot_score, v.published_at").
+		Select("v.id AS video_id, v.author_id, ("+hotScoreExpression+") AS hot_score, v.published_at").
 		Joins("LEFT JOIN video_stat AS vs ON vs.video_id = v.id").
 		Where("v.status = ? AND v.published_at IS NOT NULL", domainvideo.StatusPublished)
 }

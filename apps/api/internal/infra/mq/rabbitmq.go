@@ -2,6 +2,7 @@ package inframq
 
 import (
 	applicationinteraction "GCFeed/internal/application/interaction"
+	applicationvideo "GCFeed/internal/application/video"
 	infraconfig "GCFeed/internal/infra/config"
 	"context"
 	"encoding/json"
@@ -15,6 +16,9 @@ import (
 const defaultInteractionExchange = "gcfeed.interaction"
 const defaultActionChangedQueue = "gcfeed.interaction.action_changed"
 const defaultActionChangedRouting = "interaction.action_changed"
+const defaultVideoExchange = "gcfeed.video"
+const defaultVideoPublishedQueue = "gcfeed.video.published"
+const defaultVideoPublishedRouting = "video.published"
 
 var ErrEmptyRabbitMQURL = errors.New("rabbitmq url is empty")
 
@@ -100,6 +104,30 @@ func (r *RabbitMQ) PublishActionChanged(ctx context.Context, event *applicationi
 	)
 }
 
+func (r *RabbitMQ) PublishVideoPublished(ctx context.Context, event *applicationvideo.PublishedEvent) error {
+	if event == nil {
+		return nil
+	}
+	content, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	return r.publishChannel.PublishWithContext(
+		ctx,
+		r.config.VideoExchange,
+		r.config.VideoPublishedRouting,
+		false,
+		false,
+		amqp.Publishing{
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent,
+			MessageId:    event.EventID,
+			Timestamp:    time.Now(),
+			Body:         content,
+		},
+	)
+}
+
 func (r *RabbitMQ) ConsumeActionChanged(ctx context.Context, handler func(context.Context, *applicationinteraction.ActionChangedEvent) error) error {
 	deliveries, err := r.consumerChannel.ConsumeWithContext(
 		ctx,
@@ -118,6 +146,38 @@ func (r *RabbitMQ) ConsumeActionChanged(ctx context.Context, handler func(contex
 	go func() {
 		for delivery := range deliveries {
 			var event applicationinteraction.ActionChangedEvent
+			if err := json.Unmarshal(delivery.Body, &event); err != nil {
+				_ = delivery.Nack(false, false)
+				continue
+			}
+			if err := handler(ctx, &event); err != nil {
+				_ = delivery.Nack(false, true)
+				continue
+			}
+			_ = delivery.Ack(false)
+		}
+	}()
+	return nil
+}
+
+func (r *RabbitMQ) ConsumeVideoPublished(ctx context.Context, handler func(context.Context, *applicationvideo.PublishedEvent) error) error {
+	deliveries, err := r.consumerChannel.ConsumeWithContext(
+		ctx,
+		r.config.VideoPublishedQueue,
+		"",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for delivery := range deliveries {
+			var event applicationvideo.PublishedEvent
 			if err := json.Unmarshal(delivery.Body, &event); err != nil {
 				_ = delivery.Nack(false, false)
 				continue
@@ -154,10 +214,40 @@ func (r *RabbitMQ) ensureTopology() error {
 	); err != nil {
 		return err
 	}
-	return r.publishChannel.QueueBind(
+	if err := r.publishChannel.QueueBind(
 		r.config.ActionChangedQueue,
 		r.config.ActionChangedRouting,
 		r.config.InteractionExchange,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+	if err := r.publishChannel.ExchangeDeclare(
+		r.config.VideoExchange,
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+	if _, err := r.publishChannel.QueueDeclare(
+		r.config.VideoPublishedQueue,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+	return r.publishChannel.QueueBind(
+		r.config.VideoPublishedQueue,
+		r.config.VideoPublishedRouting,
+		r.config.VideoExchange,
 		false,
 		nil,
 	)
@@ -176,6 +266,15 @@ func normalizeRabbitMQConfig(cfg infraconfig.RabbitMQConfig) infraconfig.RabbitM
 	}
 	if cfg.ActionChangedRouting == "" {
 		cfg.ActionChangedRouting = defaultActionChangedRouting
+	}
+	if cfg.VideoExchange == "" {
+		cfg.VideoExchange = defaultVideoExchange
+	}
+	if cfg.VideoPublishedQueue == "" {
+		cfg.VideoPublishedQueue = defaultVideoPublishedQueue
+	}
+	if cfg.VideoPublishedRouting == "" {
+		cfg.VideoPublishedRouting = defaultVideoPublishedRouting
 	}
 	return cfg
 }

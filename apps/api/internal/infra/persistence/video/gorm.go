@@ -1,8 +1,6 @@
 package infravideo
 
 import (
-	domainfeed "GCFeed/internal/domain/feed"
-	domainrelation "GCFeed/internal/domain/relation"
 	domainvideo "GCFeed/internal/domain/video"
 	"context"
 	"errors"
@@ -82,9 +80,6 @@ func (r *Repository) Save(ctx context.Context, video *domainvideo.Video) error {
 		if err := tx.Create(&stat).Error; err != nil {
 			return err
 		}
-		if err := fanoutPublishedVideoToFollowers(tx, model.AuthorID, model.ID, model.PublishedAt); err != nil {
-			return err
-		}
 		return nil
 	})
 	if err != nil {
@@ -96,43 +91,6 @@ func (r *Repository) Save(ctx context.Context, video *domainvideo.Video) error {
 	video.CreatedAt = model.CreatedAt
 	video.UpdatedAt = model.UpdatedAt
 	return nil
-}
-
-func fanoutPublishedVideoToFollowers(tx *gorm.DB, authorID int64, videoID int64, publishedAt *time.Time) error {
-	if publishedAt == nil {
-		return nil
-	}
-
-	followerCount, err := authorFollowerCount(tx, authorID)
-	if err != nil {
-		return err
-	}
-	if followerCount >= domainfeed.BigCreatorFollowerThreshold {
-		return nil
-	}
-
-	return tx.Exec(`
-		INSERT INTO feed_inbox (user_id, video_id, author_id, published_at, created_at)
-		SELECT f.user_id, ?, ?, ?, NOW()
-		FROM user_follow AS f
-		WHERE f.target_user_id = ? AND f.status = ?
-		ON DUPLICATE KEY UPDATE published_at = VALUES(published_at)
-	`, videoID, authorID, *publishedAt, authorID, domainrelation.FollowStatusActive).Error
-}
-
-func authorFollowerCount(tx *gorm.DB, authorID int64) (int, error) {
-	var stat struct {
-		FollowerCount int
-	}
-	err := tx.Table("user_relation_stat").
-		Select("follower_count").
-		Where("user_id = ?", authorID).
-		Take(&stat).
-		Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, nil
-	}
-	return stat.FollowerCount, err
 }
 
 // FindByID 查询公开可见的视频详情，只返回 Published 状态。

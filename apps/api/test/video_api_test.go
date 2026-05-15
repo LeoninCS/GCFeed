@@ -50,6 +50,11 @@ type memoryVideoRepo struct {
 	byIdempotency map[string]int64
 }
 
+type memoryVideoPublisher struct {
+	mu     sync.Mutex
+	events []*applicationvideo.PublishedEvent
+}
+
 func newMemoryVideoRepo() *memoryVideoRepo {
 	return &memoryVideoRepo{
 		nextID:        1,
@@ -165,6 +170,19 @@ func (r *memoryVideoRepo) UpdateStatus(ctx context.Context, video *domainvideo.V
 	return nil
 }
 
+func (p *memoryVideoPublisher) PublishVideoPublished(ctx context.Context, event *applicationvideo.PublishedEvent) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, event)
+	return nil
+}
+
+func (p *memoryVideoPublisher) EventCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.events)
+}
+
 // TestVideoAPIFlow 覆盖视频发布、幂等重放、详情、列表、删除和重复删除。
 func TestVideoAPIFlow(t *testing.T) {
 	router, jwtManager := newVideoRouter(t)
@@ -245,6 +263,38 @@ func TestVideoAPIFlow(t *testing.T) {
 	}
 }
 
+func TestVideoPublishedEvent(t *testing.T) {
+	publisher := &memoryVideoPublisher{}
+	router, jwtManager, _ := newVideoRouterWithPublisher(t, publisher)
+	token := signTestToken(t, jwtManager, 42)
+
+	createResponse := performVideoJSONRequest(
+		router,
+		http.MethodPost,
+		"/api/videos",
+		`{"title":"event video","description":"event description","media_url":"https://example.com/video.mp4","cover_url":"https://example.com/cover.jpg"}`,
+		token,
+		"create-video-event",
+	)
+	requireStatus(t, createResponse, http.StatusCreated)
+	if publisher.EventCount() != 1 {
+		t.Fatalf("unexpected published event count after create: %d", publisher.EventCount())
+	}
+
+	replayResponse := performVideoJSONRequest(
+		router,
+		http.MethodPost,
+		"/api/videos",
+		`{"title":"changed","description":"changed","media_url":"https://example.com/changed.mp4","cover_url":"https://example.com/changed.jpg"}`,
+		token,
+		"create-video-event",
+	)
+	requireStatus(t, replayResponse, http.StatusOK)
+	if publisher.EventCount() != 1 {
+		t.Fatalf("unexpected published event count after replay: %d", publisher.EventCount())
+	}
+}
+
 // TestVideoAPIValidation 覆盖未登录、参数错误、资源缺失和权限错误。
 func TestVideoAPIValidation(t *testing.T) {
 	router, jwtManager := newVideoRouter(t)
@@ -299,6 +349,11 @@ func TestVideoAPIValidation(t *testing.T) {
 
 // newVideoRouter 只装配视频相关路由，便于视频模块独立测试。
 func newVideoRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
+	router, jwtManager, _ := newVideoRouterWithPublisher(t, nil)
+	return router, jwtManager
+}
+
+func newVideoRouterWithPublisher(t *testing.T, publisher applicationvideo.PublishedEventPublisher) (*gin.Engine, *infrajwt.Manager, *memoryVideoRepo) {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
@@ -310,7 +365,11 @@ func newVideoRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	}
 
 	repo := newMemoryVideoRepo()
-	service := applicationvideo.New(repo)
+	options := []applicationvideo.Option{}
+	if publisher != nil {
+		options = append(options, applicationvideo.WithPublishedEventPublisher(publisher))
+	}
+	service := applicationvideo.New(repo, options...)
 	handler := interfaceshttpvideo.New(service)
 	authMiddleware := interfaceshttpmiddleware.NewJWTAuth(jwtManager)
 
@@ -323,7 +382,7 @@ func newVideoRouter(t *testing.T) (*gin.Engine, *infrajwt.Manager) {
 	users.GET("/me/videos", authMiddleware, handler.ListMine)
 	users.GET("/:userId/videos", handler.ListByAuthor)
 
-	return router, jwtManager
+	return router, jwtManager, repo
 }
 
 // signTestToken 生成测试用 access token，让接口走真实 JWT 中间件。

@@ -42,6 +42,7 @@ type FeedItem struct {
 // FeedPageItem 是 Feed 页缓存中的轻量条目，只保存排序和组装所需字段。
 type FeedPageItem struct {
 	VideoID     int64
+	AuthorID    int64
 	PublishedAt time.Time
 	HotScore    int
 }

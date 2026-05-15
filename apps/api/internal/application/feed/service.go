@@ -69,6 +69,10 @@ type FeedCache interface {
 	ListHotWindowPage(ctx context.Context, windowEnd time.Time, offset int, limit int) ([]*domainfeed.FeedPageItem, error)
 }
 
+type FollowingIndexCache interface {
+	ListFollowingIndexPage(ctx context.Context, viewerID int64, authorIDs []int64, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedPageItem, bool, error)
+}
+
 // Strategy 定义单个 Feed 场景的读取策略。
 type Strategy interface {
 	Scene() domainfeed.Scene
@@ -93,8 +97,9 @@ type HotStrategy struct {
 
 // FollowingStrategy 使用推拉混合模式读取关注流。
 type FollowingStrategy struct {
-	repo  domainfeed.Repository
-	cache FeedCache
+	repo           domainfeed.Repository
+	cache          FeedCache
+	followingIndex FollowingIndexCache
 }
 
 type timelineCursorPayload struct {
@@ -128,6 +133,9 @@ func WithFeedCache(cache FeedCache) Option {
 				typed.cache = cache
 			case *FollowingStrategy:
 				typed.cache = cache
+				if index, ok := cache.(FollowingIndexCache); ok {
+					typed.followingIndex = index
+				}
 			}
 		}
 	}
@@ -397,7 +405,7 @@ func (s *FollowingStrategy) List(ctx context.Context, req FeedRequest) (*FeedRes
 }
 
 func (s *FollowingStrategy) listPageFromRepo(ctx context.Context, viewerID int64, parsedCursor *domainfeed.TimelineCursor, limit int) (*FeedPage, error) {
-	items, err := s.repo.ListFollowingPage(ctx, viewerID, parsedCursor, limit+1)
+	items, err := s.listFollowingItems(ctx, viewerID, parsedCursor, limit+1)
 	if err != nil {
 		return nil, ErrLoadFeedFailed
 	}
@@ -421,6 +429,23 @@ func (s *FollowingStrategy) listPageFromRepo(ctx context.Context, viewerID int64
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
 	}, nil
+}
+
+func (s *FollowingStrategy) listFollowingItems(ctx context.Context, viewerID int64, parsedCursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedPageItem, error) {
+	if s.followingIndex != nil {
+		authorIDs, err := s.repo.ListFollowingPullAuthorIDs(ctx, viewerID)
+		if err != nil {
+			return nil, err
+		}
+		items, ok, err := s.followingIndex.ListFollowingIndexPage(ctx, viewerID, authorIDs, parsedCursor, limit)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return items, nil
+		}
+	}
+	return s.repo.ListFollowingPage(ctx, viewerID, parsedCursor, limit)
 }
 
 // RefreshFeed 从第一页重新加载默认 Feed，适合下拉刷新场景。

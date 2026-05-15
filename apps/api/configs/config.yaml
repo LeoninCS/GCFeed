@@ -20,3 +20,6 @@ rabbitmq:
   interaction_exchange: "gcfeed.interaction"
   action_changed_queue: "gcfeed.interaction.action_changed"
   action_changed_routing: "interaction.action_changed"
+  video_exchange: "gcfeed.video"
+  video_published_queue: "gcfeed.video.published"
+  video_published_routing: "video.published"

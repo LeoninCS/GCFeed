@@ -12,8 +12,15 @@ var ErrSaveVideoFailed = errors.New("failed to save video")
 var ErrUpdateVideoFailed = errors.New("failed to update video")
 
 type Service struct {
-	repo domainvideo.Repository
+	repo      domainvideo.Repository
+	publisher PublishedEventPublisher
 }
+
+type PublishedEventPublisher interface {
+	PublishVideoPublished(ctx context.Context, event *PublishedEvent) error
+}
+
+type Option func(*Service)
 
 // CreateResult 同时表达“返回哪个视频”和“这次请求是否真的创建了新记录”。
 type CreateResult struct {
@@ -21,8 +28,18 @@ type CreateResult struct {
 	Created bool
 }
 
-func New(repo domainvideo.Repository) *Service {
-	return &Service{repo: repo}
+func New(repo domainvideo.Repository, options ...Option) *Service {
+	service := &Service{repo: repo}
+	for _, option := range options {
+		option(service)
+	}
+	return service
+}
+
+func WithPublishedEventPublisher(publisher PublishedEventPublisher) Option {
+	return func(s *Service) {
+		s.publisher = publisher
+	}
 }
 
 // CreatePublished 创建已发布视频；Idempotency-Key 命中时返回已有视频。
@@ -59,8 +76,20 @@ func (s *Service) CreatePublished(ctx context.Context, authorID int64, title, de
 		}
 		return nil, ErrSaveVideoFailed
 	}
+	s.publishCreatedVideo(ctx, video)
 
 	return &CreateResult{Video: video, Created: true}, nil
+}
+
+func (s *Service) publishCreatedVideo(ctx context.Context, video *domainvideo.Video) {
+	if s.publisher == nil {
+		return
+	}
+	event := NewPublishedEvent(video)
+	if event == nil {
+		return
+	}
+	_ = s.publisher.PublishVideoPublished(ctx, event)
 }
 
 // Get 只返回已发布视频，删除或下线的视频在公开详情里表现为找不到。

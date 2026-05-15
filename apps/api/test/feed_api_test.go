@@ -41,24 +41,27 @@ type feedItemAPIResponse struct {
 
 // memoryFeedRepo 是 Feed 测试用内存仓储，模拟时间线排序和游标分页。
 type memoryFeedRepo struct {
-	mu             sync.Mutex
-	items          []*domainfeed.FeedItem
-	timelineCalls  int
-	hotCalls       int
-	cardCalls      int
-	statCalls      int
-	following      map[int64]map[int64]struct{}
-	followerCounts map[int64]int
-	inbox          map[int64]map[int64]struct{}
-	followingCalls int
+	mu                       sync.Mutex
+	items                    []*domainfeed.FeedItem
+	timelineCalls            int
+	hotCalls                 int
+	cardCalls                int
+	statCalls                int
+	following                map[int64]map[int64]struct{}
+	followerCounts           map[int64]int
+	inbox                    map[int64]map[int64]struct{}
+	followingCalls           int
+	followingPullAuthorCalls int
 }
 
 type memoryFeedCache struct {
-	mu       sync.Mutex
-	pages    map[string]*applicationfeed.FeedPage
-	cards    map[int64]*domainfeed.FeedCard
-	stats    map[int64]*domainfeed.FeedStat
-	hotItems []*domainfeed.FeedPageItem
+	mu             sync.Mutex
+	pages          map[string]*applicationfeed.FeedPage
+	cards          map[int64]*domainfeed.FeedCard
+	stats          map[int64]*domainfeed.FeedStat
+	hotItems       []*domainfeed.FeedPageItem
+	followingInbox map[int64][]*domainfeed.FeedPageItem
+	authorOutbox   map[int64][]*domainfeed.FeedPageItem
 }
 
 func newMemoryFeedRepo(items []*domainfeed.FeedItem) *memoryFeedRepo {
@@ -72,9 +75,11 @@ func newMemoryFeedRepo(items []*domainfeed.FeedItem) *memoryFeedRepo {
 
 func newMemoryFeedCache() *memoryFeedCache {
 	return &memoryFeedCache{
-		pages: map[string]*applicationfeed.FeedPage{},
-		cards: map[int64]*domainfeed.FeedCard{},
-		stats: map[int64]*domainfeed.FeedStat{},
+		pages:          map[string]*applicationfeed.FeedPage{},
+		cards:          map[int64]*domainfeed.FeedCard{},
+		stats:          map[int64]*domainfeed.FeedStat{},
+		followingInbox: map[int64][]*domainfeed.FeedPageItem{},
+		authorOutbox:   map[int64][]*domainfeed.FeedPageItem{},
 	}
 }
 
@@ -106,6 +111,12 @@ func (r *memoryFeedRepo) FollowingCalls() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.followingCalls
+}
+
+func (r *memoryFeedRepo) FollowingPullAuthorCalls() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.followingPullAuthorCalls
 }
 
 func (r *memoryFeedRepo) FollowForTest(viewerID int64, authorID int64) {
@@ -262,6 +273,39 @@ func (c *memoryFeedCache) ListHotWindowPage(ctx context.Context, windowEnd time.
 	return items[offset:end], nil
 }
 
+func (c *memoryFeedCache) ListFollowingIndexPage(ctx context.Context, viewerID int64, authorIDs []int64, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedPageItem, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	items := make([]*domainfeed.FeedPageItem, 0)
+	items = append(items, cloneFeedPageItems(c.followingInbox[viewerID])...)
+	for _, authorID := range authorIDs {
+		items = append(items, cloneFeedPageItems(c.authorOutbox[authorID])...)
+	}
+	if len(items) == 0 {
+		return nil, false, nil
+	}
+	items = filterAndSortTimelineItems(items, cursor)
+	if limit > 0 && limit < len(items) {
+		items = items[:limit]
+	}
+	return items, true, nil
+}
+
+func (c *memoryFeedCache) AddInboxItemsForTest(userIDs []int64, item *domainfeed.FeedPageItem) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, userID := range userIDs {
+		c.followingInbox[userID] = append(c.followingInbox[userID], cloneFeedPageItems([]*domainfeed.FeedPageItem{item})...)
+	}
+}
+
+func (c *memoryFeedCache) AddAuthorOutboxItemForTest(authorID int64, item *domainfeed.FeedPageItem) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.authorOutbox[authorID] = append(c.authorOutbox[authorID], cloneFeedPageItems([]*domainfeed.FeedPageItem{item})...)
+}
+
 // ListHotPage 模拟真实仓储的 hot_score DESC, published_at DESC, video_id DESC 排序。
 func (r *memoryFeedRepo) ListHotPage(ctx context.Context, cursor *domainfeed.HotCursor, limit int) ([]*domainfeed.FeedPageItem, error) {
 	r.mu.Lock()
@@ -293,21 +337,18 @@ func (r *memoryFeedRepo) ListHotPage(ctx context.Context, cursor *domainfeed.Hot
 	return items[:limit], nil
 }
 
-// ListFollowingPage 模拟关注流推拉混合：普通作者读 inbox，大 V 作者按关注关系拉取。
+// ListFollowingPage 模拟关注流 MySQL 兜底：按关注关系读取公开视频。
 func (r *memoryFeedRepo) ListFollowingPage(ctx context.Context, viewerID int64, cursor *domainfeed.TimelineCursor, limit int) ([]*domainfeed.FeedPageItem, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.followingCalls++
 
 	followedAuthors := r.following[viewerID]
-	inboxVideos := r.inbox[viewerID]
 	seen := map[int64]struct{}{}
 	items := make([]*domainfeed.FeedPageItem, 0, len(r.items))
 	for _, item := range r.items {
 		_, followed := followedAuthors[item.AuthorID]
-		_, pushed := inboxVideos[item.VideoID]
-		pulled := followed && r.followerCounts[item.AuthorID] >= domainfeed.BigCreatorFollowerThreshold
-		if (!pushed && !pulled) || !followed {
+		if !followed {
 			continue
 		}
 		if cursor == nil || item.PublishedAt.Before(cursor.PublishedAt) || (item.PublishedAt.Equal(cursor.PublishedAt) && item.VideoID < cursor.VideoID) {
@@ -329,6 +370,24 @@ func (r *memoryFeedRepo) ListFollowingPage(ctx context.Context, viewerID int64, 
 		limit = len(items)
 	}
 	return items[:limit], nil
+}
+
+func (r *memoryFeedRepo) ListFollowingPullAuthorIDs(ctx context.Context, viewerID int64) ([]int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.followingPullAuthorCalls++
+
+	authors := make([]int64, 0, len(r.following[viewerID]))
+	for authorID := range r.following[viewerID] {
+		if r.followerCounts[authorID] < domainfeed.BigCreatorFollowerThreshold {
+			continue
+		}
+		authors = append(authors, authorID)
+	}
+	sort.Slice(authors, func(i, j int) bool {
+		return authors[i] < authors[j]
+	})
+	return authors, nil
 }
 
 func (r *memoryFeedRepo) BatchGetFeedCards(ctx context.Context, videoIDs []int64) (map[int64]*domainfeed.FeedCard, error) {
@@ -434,15 +493,11 @@ func TestFeedSceneQuery(t *testing.T) {
 	requireStatus(t, followingResponse, http.StatusUnauthorized)
 }
 
-// TestFollowingFeedScene 覆盖关注流推拉混合：普通作者来自 inbox，大 V 作者来自拉取结果。
+// TestFollowingFeedScene 覆盖关注流 MySQL 兜底读取。
 func TestFollowingFeedScene(t *testing.T) {
 	repo := newMemoryFeedRepo(seedFollowingFeedItems())
 	repo.FollowForTest(42, 100)
 	repo.FollowForTest(42, 200)
-	repo.SetFollowerCountForTest(100, domainfeed.BigCreatorFollowerThreshold)
-	repo.SetFollowerCountForTest(200, domainfeed.BigCreatorFollowerThreshold-1)
-	repo.SetFollowerCountForTest(300, domainfeed.BigCreatorFollowerThreshold)
-	repo.PushToInboxForTest(42, 2)
 	router, jwtManager := newFeedRouterWithServiceAndJWT(t, applicationfeed.New(repo))
 	token := signTestToken(t, jwtManager, 42)
 
@@ -471,6 +526,42 @@ func TestFollowingFeedScene(t *testing.T) {
 	}
 	if repo.FollowingCalls() != 2 {
 		t.Fatalf("unexpected following repo calls: %d", repo.FollowingCalls())
+	}
+}
+
+// TestFollowingFeedUsesRedisIndex 覆盖 Redis inbox 和 author outbox 合并读取。
+func TestFollowingFeedUsesRedisIndex(t *testing.T) {
+	repo := newMemoryFeedRepo(seedFollowingFeedItems())
+	repo.FollowForTest(42, 100)
+	repo.FollowForTest(42, 200)
+	repo.SetFollowerCountForTest(100, domainfeed.BigCreatorFollowerThreshold)
+	cache := newMemoryFeedCache()
+	cache.AddInboxItemsForTest([]int64{42}, &domainfeed.FeedPageItem{
+		VideoID:     2,
+		PublishedAt: seedFollowingFeedItems()[1].PublishedAt,
+	})
+	cache.AddAuthorOutboxItemForTest(100, &domainfeed.FeedPageItem{
+		VideoID:     4,
+		PublishedAt: seedFollowingFeedItems()[3].PublishedAt,
+	})
+	cache.AddAuthorOutboxItemForTest(100, &domainfeed.FeedPageItem{
+		VideoID:     1,
+		PublishedAt: seedFollowingFeedItems()[0].PublishedAt,
+	})
+
+	router, jwtManager := newFeedRouterWithServiceAndJWT(t, applicationfeed.New(repo, applicationfeed.WithFeedCache(cache)))
+	token := signTestToken(t, jwtManager, 42)
+
+	response := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=following&limit=2", "", token)
+	requireStatus(t, response, http.StatusOK)
+
+	var page feedAPIResponse
+	decodeJSON(t, response, &page)
+	if len(page.Items) != 2 || page.Items[0].VideoID != 4 || page.Items[1].VideoID != 2 || !page.HasMore {
+		t.Fatalf("unexpected following index page: %+v", page)
+	}
+	if repo.FollowingCalls() != 0 || repo.FollowingPullAuthorCalls() != 1 {
+		t.Fatalf("unexpected following repo calls: page=%d authors=%d", repo.FollowingCalls(), repo.FollowingPullAuthorCalls())
 	}
 }
 
@@ -652,6 +743,7 @@ func seedFollowingFeedItems() []*domainfeed.FeedItem {
 func feedPageItemFromFeedItem(item *domainfeed.FeedItem) *domainfeed.FeedPageItem {
 	return &domainfeed.FeedPageItem{
 		VideoID:     item.VideoID,
+		AuthorID:    item.AuthorID,
 		PublishedAt: item.PublishedAt,
 		HotScore:    item.HotScore,
 	}
@@ -690,6 +782,32 @@ func cloneFeedPageItems(items []*domainfeed.FeedPageItem) []*domainfeed.FeedPage
 		cloned = append(cloned, &value)
 	}
 	return cloned
+}
+
+func filterAndSortTimelineItems(items []*domainfeed.FeedPageItem, cursor *domainfeed.TimelineCursor) []*domainfeed.FeedPageItem {
+	filtered := make([]*domainfeed.FeedPageItem, 0, len(items))
+	seen := map[int64]struct{}{}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if _, exists := seen[item.VideoID]; exists {
+			continue
+		}
+		if cursor != nil && !item.PublishedAt.Before(cursor.PublishedAt) && !(item.PublishedAt.Equal(cursor.PublishedAt) && item.VideoID < cursor.VideoID) {
+			continue
+		}
+		seen[item.VideoID] = struct{}{}
+		value := *item
+		filtered = append(filtered, &value)
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].PublishedAt.Equal(filtered[j].PublishedAt) {
+			return filtered[i].VideoID > filtered[j].VideoID
+		}
+		return filtered[i].PublishedAt.After(filtered[j].PublishedAt)
+	})
+	return filtered
 }
 
 func int64Set(values []int64) map[int64]struct{} {

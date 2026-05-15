@@ -72,12 +72,12 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	accountService := applicationaccount.New(accountRepo, jwtManager)
 	accountHandler := interfaceshttpaccount.New(accountService)
 	videoRepo := infravideo.New(gormDB)
-	videoService := applicationvideo.New(videoRepo)
-	videoHandler := interfaceshttpvideo.New(videoService)
 	feedRepo := infrafeed.New(gormDB)
 	feedOptions := []applicationfeed.Option{}
+	videoOptions := []applicationvideo.Option{}
 	interactionOptions := []applicationinteraction.Option{}
 	var feedCache *infracache.FeedCache
+	var rabbitMQ *inframq.RabbitMQ
 	if cfg.Redis.Addr != "" {
 		redisClient := infracache.NewRedisClient(cfg.Redis)
 		feedCache = infracache.NewFeedCache(redisClient)
@@ -87,18 +87,28 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	feedService := applicationfeed.New(feedRepo, feedOptions...)
 	feedHandler := interfaceshttpfeed.New(feedService)
 	interactionRepo := infrainteraction.New(gormDB)
-	if feedCache != nil && cfg.RabbitMQ.URL != "" {
-		rabbitMQ, err := inframq.NewRabbitMQ(cfg.RabbitMQ)
+	if cfg.RabbitMQ.URL != "" {
+		rabbitMQ, err = inframq.NewRabbitMQ(cfg.RabbitMQ)
 		if err != nil {
 			log.Printf("rabbitmq disabled: %v", err)
 		} else {
-			interactionOptions = append(interactionOptions, applicationinteraction.WithAsyncActionPipeline(feedCache, rabbitMQ))
-			worker := applicationinteraction.NewActionWorker(interactionRepo, rabbitMQ)
-			if err := worker.Start(context.Background()); err != nil {
-				log.Printf("interaction action worker disabled: %v", err)
+			videoOptions = append(videoOptions, applicationvideo.WithPublishedEventPublisher(rabbitMQ))
+			if feedCache != nil {
+				interactionOptions = append(interactionOptions, applicationinteraction.WithAsyncActionPipeline(feedCache, rabbitMQ))
+				worker := applicationinteraction.NewActionWorker(interactionRepo, rabbitMQ)
+				if err := worker.Start(context.Background()); err != nil {
+					log.Printf("interaction action worker disabled: %v", err)
+				}
+				feedPreheater := applicationvideo.NewFeedPreheater(feedRepo, feedCache)
+				fanoutWorker := applicationvideo.NewFanoutWorker(feedRepo, rabbitMQ, feedCache, feedPreheater)
+				if err := fanoutWorker.Start(context.Background()); err != nil {
+					log.Printf("video fanout worker disabled: %v", err)
+				}
 			}
 		}
 	}
+	videoService := applicationvideo.New(videoRepo, videoOptions...)
+	videoHandler := interfaceshttpvideo.New(videoService)
 	interactionService := applicationinteraction.New(interactionRepo, interactionOptions...)
 	interactionHandler := interfaceshttpinteraction.New(interactionService)
 	relationRepo := infrarelation.New(gormDB)
