@@ -6,6 +6,7 @@ const PUBLIC_PROFILE_KEY = "gcfeed.publicProfiles";
 const FEED_TRANSITION_MS = 320;
 const FEED_SCENES = [
   { key: "timeline", label: "最新视频", route: "/timeline", icon: "home" },
+  { key: "following", label: "关注流", route: "/following", icon: "subscriptions" },
   { key: "hot", label: "热门榜单", route: "/hotfeed", icon: "local_fire_department" }
 ];
 
@@ -347,6 +348,18 @@ function FeedPage({ feedScene, session, onNavigate }) {
 
   const loadFeed = useCallback(() => {
     let live = true;
+    if (feedScene === "following" && !session.token) {
+      setSwipe(null);
+      setItems([]);
+      setIndex(0);
+      setCommentsOpen(false);
+      setFeedError("");
+      setFeedState("auth");
+      return () => {
+        live = false;
+      };
+    }
+
     setFeedState("loading");
     setFeedError("");
     apiRequest(`/api/feed-items?scene=${encodeURIComponent(feedScene)}&limit=10`, { token: session.token })
@@ -360,6 +373,13 @@ function FeedPage({ feedScene, session, onNavigate }) {
       })
       .catch((error) => {
         if (!live) return;
+        if (error.status === 401 && feedScene === "following") {
+          setItems([]);
+          setIndex(0);
+          setCommentsOpen(false);
+          setFeedState("auth");
+          return;
+        }
         setItems([]);
         setFeedError(error.message || `${currentFeedScene.label}加载失败`);
         setFeedState("error");
@@ -743,6 +763,9 @@ function FeedPage({ feedScene, session, onNavigate }) {
         onPointerCancel={handlePointerEnd}
       >
         {feedState === "loading" && <FeedMessage icon="hourglass_top" title={`正在加载${currentFeedScene.label}`} />}
+        {feedState === "auth" && (
+          <FeedMessage icon="lock" title="登录后查看关注流" action="登录" onAction={() => onNavigate("/auth")} />
+        )}
         {feedState === "error" && (
           <FeedMessage icon="sync_problem" title={feedError} action="重新加载" onAction={loadFeed} />
         )}
@@ -1750,7 +1773,7 @@ function normalizeRoute(pathname) {
   if (pathname === "/login") return "/auth";
   if (pathname === "/me") return "/profile";
   if (/^\/users\/\d+$/.test(pathname)) return pathname;
-  if (["/", "/auth", "/timeline", "/hotfeed", "/profile", "/upload"].includes(pathname)) return pathname;
+  if (["/", "/auth", "/timeline", "/following", "/hotfeed", "/profile", "/upload"].includes(pathname)) return pathname;
   return "/timeline";
 }
 
