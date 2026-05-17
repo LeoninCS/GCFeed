@@ -45,6 +45,9 @@ func TestHashNgramVectorizerSimilarity(t *testing.T) {
 	if similarScore <= differentScore {
 		t.Fatalf("expected similar text score to be higher: similar=%f different=%f", similarScore, differentScore)
 	}
+	if sameVector(base, different) {
+		t.Fatalf("different text produced same vector")
+	}
 }
 
 func TestHashNgramVectorizerEmptyText(t *testing.T) {
@@ -56,6 +59,19 @@ func TestHashNgramVectorizerEmptyText(t *testing.T) {
 	}
 	if norm(vector) != 0 {
 		t.Fatalf("expected zero vector for empty text: %f", norm(vector))
+	}
+}
+
+func TestBuildVideoTextAndHash(t *testing.T) {
+	text := BuildVideoText(" 篮球训练 ", " 投篮技巧 ")
+	if text != "篮球训练\n投篮技巧" {
+		t.Fatalf("unexpected video text: %q", text)
+	}
+	if TextHash(text) != TextHash(text) {
+		t.Fatalf("text hash is not stable")
+	}
+	if TextHash(text) == TextHash("美食探店\n火锅推荐") {
+		t.Fatalf("different text has same hash")
 	}
 }
 
@@ -72,4 +88,16 @@ func norm(vector []float64) float64 {
 		sum += value * value
 	}
 	return math.Sqrt(sum)
+}
+
+func sameVector(left []float64, right []float64) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }

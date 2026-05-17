@@ -22,6 +22,7 @@ rabbitmq:
   action_changed_routing: "interaction.action_changed"
   video_exchange: "gcfeed.video"
   video_published_queue: "gcfeed.video.published"
+  video_embedding_queue: "gcfeed.video.embedding"
   video_published_routing: "video.published"
   exposure_exchange: "gcfeed.exposure"
   view_event_recorded_queue: "gcfeed.exposure.view_event_recorded"

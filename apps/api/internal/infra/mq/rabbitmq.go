@@ -19,6 +19,7 @@ const defaultActionChangedQueue = "gcfeed.interaction.action_changed"
 const defaultActionChangedRouting = "interaction.action_changed"
 const defaultVideoExchange = "gcfeed.video"
 const defaultVideoPublishedQueue = "gcfeed.video.published"
+const defaultVideoEmbeddingQueue = "gcfeed.video.embedding"
 const defaultVideoPublishedRouting = "video.published"
 const defaultExposureExchange = "gcfeed.exposure"
 const defaultViewEventRecordedQueue = "gcfeed.exposure.view_event_recorded"
@@ -189,9 +190,17 @@ func (r *RabbitMQ) ConsumeActionChanged(ctx context.Context, handler func(contex
 }
 
 func (r *RabbitMQ) ConsumeVideoPublished(ctx context.Context, handler func(context.Context, *applicationvideo.PublishedEvent) error) error {
+	return r.consumeVideoPublishedQueue(ctx, r.config.VideoPublishedQueue, handler)
+}
+
+func (r *RabbitMQ) ConsumeVideoPublishedForEmbedding(ctx context.Context, handler func(context.Context, *applicationvideo.PublishedEvent) error) error {
+	return r.consumeVideoPublishedQueue(ctx, r.config.VideoEmbeddingQueue, handler)
+}
+
+func (r *RabbitMQ) consumeVideoPublishedQueue(ctx context.Context, queue string, handler func(context.Context, *applicationvideo.PublishedEvent) error) error {
 	deliveries, err := r.consumerChannel.ConsumeWithContext(
 		ctx,
-		r.config.VideoPublishedQueue,
+		queue,
 		"",
 		false,
 		false,
@@ -313,6 +322,25 @@ func (r *RabbitMQ) ensureTopology() error {
 	); err != nil {
 		return err
 	}
+	if _, err := r.publishChannel.QueueDeclare(
+		r.config.VideoEmbeddingQueue,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+	if err := r.publishChannel.QueueBind(
+		r.config.VideoEmbeddingQueue,
+		r.config.VideoPublishedRouting,
+		r.config.VideoExchange,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
 	if err := r.publishChannel.ExchangeDeclare(
 		r.config.ExposureExchange,
 		"topic",
@@ -362,6 +390,10 @@ func normalizeRabbitMQConfig(cfg infraconfig.RabbitMQConfig) infraconfig.RabbitM
 	}
 	if cfg.VideoPublishedQueue == "" {
 		cfg.VideoPublishedQueue = defaultVideoPublishedQueue
+	}
+	cfg.VideoEmbeddingQueue = strings.TrimSpace(cfg.VideoEmbeddingQueue)
+	if cfg.VideoEmbeddingQueue == "" {
+		cfg.VideoEmbeddingQueue = defaultVideoEmbeddingQueue
 	}
 	if cfg.VideoPublishedRouting == "" {
 		cfg.VideoPublishedRouting = defaultVideoPublishedRouting

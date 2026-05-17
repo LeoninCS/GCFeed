@@ -39,6 +39,7 @@ type RabbitMQConfig struct {
 	ActionChangedRouting     string `yaml:"action_changed_routing"`
 	VideoExchange            string `yaml:"video_exchange"`
 	VideoPublishedQueue      string `yaml:"video_published_queue"`
+	VideoEmbeddingQueue      string `yaml:"video_embedding_queue"`
 	VideoPublishedRouting    string `yaml:"video_published_routing"`
 	ExposureExchange         string `yaml:"exposure_exchange"`
 	ViewEventRecordedQueue   string `yaml:"view_event_recorded_queue"`
