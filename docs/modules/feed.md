@@ -8,6 +8,7 @@
 | 方法 | 接口路径 | 作用 | 鉴权 | 幂等键 |
 | --- | --- | --- | --- | --- |
 | GET | `/api/feed-items` | 获取按 scene 排序的视频流 | 可匿名 | - |
+| POST | `/api/video-view-events` | 上报曝光和观看事件 | 登录 | - |
 
 ### 2.1 Feed Items API
 
@@ -83,7 +84,31 @@
 
 ## 3. 数据表设计（最小实现）
 
-Feed 依赖已有 `video` 和 `video_stat` 表读取已上线视频与互动计数。
+Feed 依赖已有 `video` 和 `video_stat` 表读取已上线视频与互动计数。曝光上报写入 `video_view_events` 行为流水，并在 `event_type=exposed` 时维护 `exposures` 聚合索引。
+
+`video_view_events`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | 主键 |
+| `user_id` | 上报用户 |
+| `video_id` | 视频 ID |
+| `scene` | Feed 场景 |
+| `request_id` | 一次 Feed 请求标识 |
+| `event_type` | `exposed`、`play`、`complete`、`skip` |
+| `watch_ms` | 观看时长 |
+| `completed` | 是否完播 |
+| `created_at` | 事件时间 |
+
+`exposures`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `user_id` + `video_id` | 唯一曝光事实 |
+| `first_exposed_at` | 首次曝光时间 |
+| `last_exposed_at` | 最近曝光时间 |
+| `exposure_count` | 重复曝光次数 |
+| `last_scene` | 最近曝光场景 |
 
 推荐索引：
 

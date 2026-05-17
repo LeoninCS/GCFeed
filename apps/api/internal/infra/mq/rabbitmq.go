@@ -1,6 +1,7 @@
 package inframq
 
 import (
+	applicationexposure "GCFeed/internal/application/exposure"
 	applicationinteraction "GCFeed/internal/application/interaction"
 	applicationvideo "GCFeed/internal/application/video"
 	infraconfig "GCFeed/internal/infra/config"
@@ -19,6 +20,9 @@ const defaultActionChangedRouting = "interaction.action_changed"
 const defaultVideoExchange = "gcfeed.video"
 const defaultVideoPublishedQueue = "gcfeed.video.published"
 const defaultVideoPublishedRouting = "video.published"
+const defaultExposureExchange = "gcfeed.exposure"
+const defaultViewEventRecordedQueue = "gcfeed.exposure.view_event_recorded"
+const defaultViewEventRecordedRouting = "exposure.view_event_recorded"
 
 var ErrEmptyRabbitMQURL = errors.New("rabbitmq url is empty")
 
@@ -128,6 +132,30 @@ func (r *RabbitMQ) PublishVideoPublished(ctx context.Context, event *application
 	)
 }
 
+func (r *RabbitMQ) PublishViewEventRecorded(ctx context.Context, event *applicationexposure.ViewEventRecordedEvent) error {
+	if event == nil {
+		return nil
+	}
+	content, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	return r.publishChannel.PublishWithContext(
+		ctx,
+		r.config.ExposureExchange,
+		r.config.ViewEventRecordedRouting,
+		false,
+		false,
+		amqp.Publishing{
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent,
+			MessageId:    event.EventID,
+			Timestamp:    time.Now(),
+			Body:         content,
+		},
+	)
+}
+
 func (r *RabbitMQ) ConsumeActionChanged(ctx context.Context, handler func(context.Context, *applicationinteraction.ActionChangedEvent) error) error {
 	deliveries, err := r.consumerChannel.ConsumeWithContext(
 		ctx,
@@ -178,6 +206,38 @@ func (r *RabbitMQ) ConsumeVideoPublished(ctx context.Context, handler func(conte
 	go func() {
 		for delivery := range deliveries {
 			var event applicationvideo.PublishedEvent
+			if err := json.Unmarshal(delivery.Body, &event); err != nil {
+				_ = delivery.Nack(false, false)
+				continue
+			}
+			if err := handler(ctx, &event); err != nil {
+				_ = delivery.Nack(false, true)
+				continue
+			}
+			_ = delivery.Ack(false)
+		}
+	}()
+	return nil
+}
+
+func (r *RabbitMQ) ConsumeViewEventRecorded(ctx context.Context, handler func(context.Context, *applicationexposure.ViewEventRecordedEvent) error) error {
+	deliveries, err := r.consumerChannel.ConsumeWithContext(
+		ctx,
+		r.config.ViewEventRecordedQueue,
+		"",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for delivery := range deliveries {
+			var event applicationexposure.ViewEventRecordedEvent
 			if err := json.Unmarshal(delivery.Body, &event); err != nil {
 				_ = delivery.Nack(false, false)
 				continue
@@ -244,10 +304,40 @@ func (r *RabbitMQ) ensureTopology() error {
 	); err != nil {
 		return err
 	}
-	return r.publishChannel.QueueBind(
+	if err := r.publishChannel.QueueBind(
 		r.config.VideoPublishedQueue,
 		r.config.VideoPublishedRouting,
 		r.config.VideoExchange,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+	if err := r.publishChannel.ExchangeDeclare(
+		r.config.ExposureExchange,
+		"topic",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+	if _, err := r.publishChannel.QueueDeclare(
+		r.config.ViewEventRecordedQueue,
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return err
+	}
+	return r.publishChannel.QueueBind(
+		r.config.ViewEventRecordedQueue,
+		r.config.ViewEventRecordedRouting,
+		r.config.ExposureExchange,
 		false,
 		nil,
 	)
@@ -275,6 +365,18 @@ func normalizeRabbitMQConfig(cfg infraconfig.RabbitMQConfig) infraconfig.RabbitM
 	}
 	if cfg.VideoPublishedRouting == "" {
 		cfg.VideoPublishedRouting = defaultVideoPublishedRouting
+	}
+	cfg.ExposureExchange = strings.TrimSpace(cfg.ExposureExchange)
+	cfg.ViewEventRecordedQueue = strings.TrimSpace(cfg.ViewEventRecordedQueue)
+	cfg.ViewEventRecordedRouting = strings.TrimSpace(cfg.ViewEventRecordedRouting)
+	if cfg.ExposureExchange == "" {
+		cfg.ExposureExchange = defaultExposureExchange
+	}
+	if cfg.ViewEventRecordedQueue == "" {
+		cfg.ViewEventRecordedQueue = defaultViewEventRecordedQueue
+	}
+	if cfg.ViewEventRecordedRouting == "" {
+		cfg.ViewEventRecordedRouting = defaultViewEventRecordedRouting
 	}
 	return cfg
 }

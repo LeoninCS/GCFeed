@@ -2,6 +2,7 @@ package interfaceshttprouter
 
 import (
 	applicationaccount "GCFeed/internal/application/account"
+	applicationexposure "GCFeed/internal/application/exposure"
 	applicationfeed "GCFeed/internal/application/feed"
 	applicationinteraction "GCFeed/internal/application/interaction"
 	applicationrelation "GCFeed/internal/application/relation"
@@ -11,11 +12,13 @@ import (
 	infrajwt "GCFeed/internal/infra/jwt"
 	inframq "GCFeed/internal/infra/mq"
 	infraaccount "GCFeed/internal/infra/persistence/account"
+	infraexposure "GCFeed/internal/infra/persistence/exposure"
 	infrafeed "GCFeed/internal/infra/persistence/feed"
 	infrainteraction "GCFeed/internal/infra/persistence/interaction"
 	infrarelation "GCFeed/internal/infra/persistence/relation"
 	infravideo "GCFeed/internal/infra/persistence/video"
 	interfaceshttpaccount "GCFeed/internal/interfaces/http/account"
+	interfaceshttpexposure "GCFeed/internal/interfaces/http/exposure"
 	interfaceshttpfeed "GCFeed/internal/interfaces/http/feed"
 	interfaceshttpinteraction "GCFeed/internal/interfaces/http/interaction"
 	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
@@ -47,6 +50,8 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 		&infravideo.VideoModel{},
 		&infravideo.VideoStatModel{},
 		&infrafeed.InboxModel{},
+		&infraexposure.ViewEventModel{},
+		&infraexposure.ExposureModel{},
 		&infrainteraction.ActionModel{},
 		&infrainteraction.CommentModel{},
 		&infrarelation.FollowModel{},
@@ -76,6 +81,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	feedOptions := []applicationfeed.Option{}
 	videoOptions := []applicationvideo.Option{}
 	interactionOptions := []applicationinteraction.Option{}
+	exposureOptions := []applicationexposure.Option{}
 	var feedCache *infracache.FeedCache
 	var rabbitMQ *inframq.RabbitMQ
 	if cfg.Redis.Addr != "" {
@@ -93,6 +99,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 			log.Printf("rabbitmq disabled: %v", err)
 		} else {
 			videoOptions = append(videoOptions, applicationvideo.WithPublishedEventPublisher(rabbitMQ))
+			exposureOptions = append(exposureOptions, applicationexposure.WithViewEventPublisher(rabbitMQ))
 			if feedCache != nil {
 				interactionOptions = append(interactionOptions, applicationinteraction.WithAsyncActionPipeline(feedCache, rabbitMQ))
 				worker := applicationinteraction.NewActionWorker(interactionRepo, rabbitMQ)
@@ -111,6 +118,9 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	videoHandler := interfaceshttpvideo.New(videoService)
 	interactionService := applicationinteraction.New(interactionRepo, interactionOptions...)
 	interactionHandler := interfaceshttpinteraction.New(interactionService)
+	exposureRepo := infraexposure.New(gormDB)
+	exposureService := applicationexposure.New(exposureRepo, exposureOptions...)
+	exposureHandler := interfaceshttpexposure.New(exposureService)
 	relationRepo := infrarelation.New(gormDB)
 	relationService := applicationrelation.New(relationRepo)
 	relationHandler := interfaceshttprelation.New(relationService)
@@ -161,6 +171,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	// Feed 暴露为条目集合，客户端通过游标和 limit 控制分页。
 	api.GET("/feed-items", optionalAuthMiddleware, feedHandler.ListFeedItems)
 	api.POST("/feed-queries", optionalAuthMiddleware, feedHandler.Query)
+	api.POST("/video-view-events", authMiddleware, exposureHandler.CreateViewEvent)
 	// 删除评论只需要评论自身 ID，所以放在顶层 comments 资源下。
 	api.DELETE("/comments/:commentId", authMiddleware, interactionHandler.DeleteComment)
 

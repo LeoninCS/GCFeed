@@ -116,7 +116,7 @@ docker compose down -v
 | ✅ | 视频 | GET | `/api/videos/{videoId}` | 视频详情 |
 | ✅ | 视频 | GET | `/api/users/me/videos` | 我的作品列表 |
 | ✅ | Feed | GET | `/api/feed-items` | 拉取视频流，支持 scene 和游标分页 |
-| [ ] | Feed | POST | `/api/video-view-events` | 上报曝光和观看事件 |
+| ✅ | Feed | POST | `/api/video-view-events` | 上报曝光和观看事件 |
 | [ ] | 推荐 | POST | `/internal/recommendation-candidates` | 召回、排序、打散推荐候选 |
 | [ ] | 推荐 | POST | `/internal/exposures` | 写入曝光记录 |
 | ✅ | 互动 | PUT | `/api/videos/{videoId}/like` | 点赞 |
