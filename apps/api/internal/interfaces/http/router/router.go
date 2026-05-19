@@ -6,6 +6,7 @@ import (
 	applicationexposure "GCFeed/internal/application/exposure"
 	applicationfeed "GCFeed/internal/application/feed"
 	applicationinteraction "GCFeed/internal/application/interaction"
+	applicationrecommendation "GCFeed/internal/application/recommendation"
 	applicationrelation "GCFeed/internal/application/relation"
 	applicationvideo "GCFeed/internal/application/video"
 	infracache "GCFeed/internal/infra/cache"
@@ -17,6 +18,7 @@ import (
 	infraexposure "GCFeed/internal/infra/persistence/exposure"
 	infrafeed "GCFeed/internal/infra/persistence/feed"
 	infrainteraction "GCFeed/internal/infra/persistence/interaction"
+	infrarecommendation "GCFeed/internal/infra/persistence/recommendation"
 	infrarelation "GCFeed/internal/infra/persistence/relation"
 	infravideo "GCFeed/internal/infra/persistence/video"
 	interfaceshttpaccount "GCFeed/internal/interfaces/http/account"
@@ -24,6 +26,7 @@ import (
 	interfaceshttpfeed "GCFeed/internal/interfaces/http/feed"
 	interfaceshttpinteraction "GCFeed/internal/interfaces/http/interaction"
 	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
+	interfaceshttprecommendation "GCFeed/internal/interfaces/http/recommendation"
 	interfaceshttprelation "GCFeed/internal/interfaces/http/relation"
 	interfaceshttpupload "GCFeed/internal/interfaces/http/upload"
 	interfaceshttpvideo "GCFeed/internal/interfaces/http/video"
@@ -83,7 +86,10 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	embeddingService := applicationembedding.New(embeddingRepo, nil)
 	videoRepo := infravideo.New(gormDB)
 	feedRepo := infrafeed.New(gormDB)
-	feedOptions := []applicationfeed.Option{}
+	recommendationRepo := infrarecommendation.New(gormDB)
+	recommendationService := applicationrecommendation.New(recommendationRepo)
+	recommendationHandler := interfaceshttprecommendation.New(recommendationService)
+	feedOptions := []applicationfeed.Option{applicationfeed.WithRecommender(recommendationService)}
 	videoOptions := []applicationvideo.Option{}
 	interactionOptions := []applicationinteraction.Option{}
 	exposureOptions := []applicationexposure.Option{}
@@ -183,6 +189,10 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	api.POST("/video-view-events", authMiddleware, exposureHandler.CreateViewEvent)
 	// 删除评论只需要评论自身 ID，所以放在顶层 comments 资源下。
 	api.DELETE("/comments/:commentId", authMiddleware, interactionHandler.DeleteComment)
+
+	internal := g.Group("/internal")
+	internal.POST("/recommendation-candidates", recommendationHandler.ListCandidates)
+	internal.POST("/exposures", recommendationHandler.SaveExposures)
 
 	return nil
 }

@@ -1,6 +1,7 @@
 package applicationfeed
 
 import (
+	applicationrecommendation "GCFeed/internal/application/recommendation"
 	domainfeed "GCFeed/internal/domain/feed"
 	"context"
 	"crypto/sha1"
@@ -26,6 +27,7 @@ var ErrLoadFeedFailed = errors.New("failed to load feed")
 
 // Service 通过 scene 策略注册表分发不同 Feed 场景。
 type Service struct {
+	repo         domainfeed.Repository
 	strategies   map[domainfeed.Scene]Strategy
 	defaultScene domainfeed.Scene
 }
@@ -102,6 +104,17 @@ type FollowingStrategy struct {
 	followingIndex FollowingIndexCache
 }
 
+// RecommendStrategy 使用推荐服务读取排序后的候选，再复用 Feed 卡片组装。
+type RecommendStrategy struct {
+	repo        domainfeed.Repository
+	cache       FeedCache
+	recommender Recommender
+}
+
+type Recommender interface {
+	Recommend(ctx context.Context, input applicationrecommendation.CandidateRequest) (*applicationrecommendation.CandidateResult, error)
+}
+
 type timelineCursorPayload struct {
 	PublishedAt string `json:"published_at"`
 	VideoID     int64  `json:"video_id"`
@@ -136,7 +149,18 @@ func WithFeedCache(cache FeedCache) Option {
 				if index, ok := cache.(FollowingIndexCache); ok {
 					typed.followingIndex = index
 				}
+			case *RecommendStrategy:
+				typed.cache = cache
 			}
+		}
+	}
+}
+
+// WithRecommender 注册推荐 Feed 策略。
+func WithRecommender(recommender Recommender) Option {
+	return func(s *Service) {
+		if recommender != nil {
+			s.RegisterStrategy(NewRecommendStrategy(s.repo, recommender))
 		}
 	}
 }
@@ -144,6 +168,7 @@ func WithFeedCache(cache FeedCache) Option {
 // New 注入 Feed 仓储并注册默认时间线策略。
 func New(repo domainfeed.Repository, options ...Option) *Service {
 	service := &Service{
+		repo:         repo,
 		strategies:   map[domainfeed.Scene]Strategy{},
 		defaultScene: domainfeed.DefaultScene,
 	}
@@ -448,6 +473,60 @@ func (s *FollowingStrategy) listFollowingItems(ctx context.Context, viewerID int
 	return s.repo.ListFollowingPage(ctx, viewerID, parsedCursor, limit)
 }
 
+// NewRecommendStrategy 创建推荐 Feed 策略。
+func NewRecommendStrategy(repo domainfeed.Repository, recommender Recommender) *RecommendStrategy {
+	return &RecommendStrategy{
+		repo:        repo,
+		recommender: recommender,
+	}
+}
+
+// Scene 返回推荐场景。
+func (s *RecommendStrategy) Scene() domainfeed.Scene {
+	return domainfeed.SceneRecommend
+}
+
+// List 读取推荐候选，并按推荐服务给出的顺序组装 Feed 卡片。
+func (s *RecommendStrategy) List(ctx context.Context, req FeedRequest) (*FeedResult, error) {
+	if req.ViewerID <= 0 {
+		return nil, domainfeed.ErrViewerRequired
+	}
+	limit := normalizeLimit(req.Limit)
+	result, err := s.recommender.Recommend(ctx, applicationrecommendation.CandidateRequest{
+		UserID:    req.ViewerID,
+		Scene:     string(domainfeed.SceneRecommend),
+		RequestID: clientContextValue(req.ClientContext, "request_id"),
+		Cursor:    req.Cursor,
+		Limit:     limit,
+	})
+	if err != nil {
+		if errors.Is(err, applicationrecommendation.ErrLoadRecommendationFailed) {
+			return nil, ErrLoadFeedFailed
+		}
+		return nil, err
+	}
+
+	pageItems := make([]*domainfeed.FeedPageItem, 0, len(result.Candidates))
+	for _, candidate := range result.Candidates {
+		pageItems = append(pageItems, &domainfeed.FeedPageItem{
+			VideoID:     candidate.VideoID,
+			AuthorID:    candidate.AuthorID,
+			PublishedAt: candidate.PublishedAt,
+			HotScore:    candidate.HotScore,
+		})
+	}
+	items, err := assembleFeedItems(ctx, s.repo, s.cache, pageItems)
+	if err != nil {
+		return nil, ErrLoadFeedFailed
+	}
+	return &FeedResult{
+		Scene:      domainfeed.SceneRecommend,
+		Items:      items,
+		NextCursor: result.NextCursor,
+		HasMore:    result.HasMore,
+	}, nil
+}
+
 // RefreshFeed 从第一页重新加载默认 Feed，适合下拉刷新场景。
 func (s *Service) RefreshFeed(ctx context.Context, limit int) (*FeedResult, error) {
 	return s.GetTimelineFeed(ctx, "", limit)
@@ -462,6 +541,13 @@ func normalizeLimit(limit int) int {
 		return domainfeed.MaxLimit
 	}
 	return limit
+}
+
+func clientContextValue(context map[string]string, key string) string {
+	if context == nil {
+		return ""
+	}
+	return context[key]
 }
 
 func loadFeedPage(ctx context.Context, cache FeedCache, scene domainfeed.Scene, cursor string, limit int, firstPageTTL time.Duration, pageTTL time.Duration, group *singleflight.Group, load func() (*FeedPage, error)) (*FeedPage, error) {
