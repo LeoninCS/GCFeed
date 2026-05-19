@@ -5,6 +5,7 @@ const USER_KEY = "gcfeed.user";
 const PUBLIC_PROFILE_KEY = "gcfeed.publicProfiles";
 const FEED_TRANSITION_MS = 320;
 const FEED_SCENES = [
+  { key: "recommend", label: "推荐流", route: "/recommend", icon: "auto_awesome" },
   { key: "timeline", label: "最新视频", route: "/timeline", icon: "home" },
   { key: "following", label: "关注流", route: "/following", icon: "subscriptions" },
   { key: "hot", label: "热门榜单", route: "/hotfeed", icon: "local_fire_department" }
@@ -48,7 +49,7 @@ function App() {
 
   useEffect(() => {
     if (route === "/") {
-      navigate("/timeline", setRoute);
+      navigate(token ? "/recommend" : "/timeline", setRoute);
     }
     if ((route === "/profile" || route === "/me") && !(token && user)) {
       navigate("/timeline", setRoute);
@@ -170,7 +171,7 @@ function LoginPage({ session, onNavigate }) {
       const accessToken = tokenResponse.access_token;
       const profile = await apiRequest("/api/users/me", { token: accessToken });
       session.setAuth(accessToken, profile);
-      onNavigate("/timeline");
+      onNavigate("/recommend");
     } catch (error) {
       setMessage(error.message || "登录失败，请检查账号与密码");
     } finally {
@@ -281,7 +282,7 @@ function TopNav({ user, authenticated, onNavigate, onLogout }) {
   return (
     <header className="top-nav">
       <div className="top-left">
-        <button className="wordmark" onClick={() => onNavigate("/timeline")}>
+        <button className="wordmark" onClick={() => onNavigate(authenticated ? "/recommend" : "/timeline")}>
           GCFeed
         </button>
       </div>
@@ -338,45 +339,67 @@ function FeedPage({ feedScene, session, onNavigate }) {
   const [commentText, setCommentText] = useState("");
   const [feedState, setFeedState] = useState("loading");
   const [feedError, setFeedError] = useState("");
+  const [nextCursor, setNextCursor] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [feedRequestID, setFeedRequestID] = useState("");
   const [swipe, setSwipe] = useState(null);
   const wheelLocked = useRef(false);
   const transitionTimer = useRef(null);
   const feedMainRef = useRef(null);
   const dragRef = useRef(null);
   const swipeRef = useRef(null);
+  const loadingMoreRef = useRef(false);
+  const feedRequestIDRef = useRef("");
+  const exposedRef = useRef(new Set());
   const currentFeedScene = FEED_SCENES.find((scene) => scene.key === feedScene) || FEED_SCENES[0];
 
   const loadFeed = useCallback(() => {
     let live = true;
-    if (feedScene === "following" && !session.token) {
+    if (requiresAuthFeed(feedScene) && !session.token) {
       setSwipe(null);
       setItems([]);
       setIndex(0);
       setCommentsOpen(false);
       setFeedError("");
+      setNextCursor("");
+      setHasMore(false);
+      setLoadingMore(false);
       setFeedState("auth");
       return () => {
         live = false;
       };
     }
 
+    const requestID = createFeedRequestID(feedScene);
+    feedRequestIDRef.current = requestID;
+    exposedRef.current = new Set();
+    loadingMoreRef.current = false;
+    setFeedRequestID(requestID);
+    setNextCursor("");
+    setHasMore(false);
+    setLoadingMore(false);
     setFeedState("loading");
     setFeedError("");
-    apiRequest(`/api/feed-items?scene=${encodeURIComponent(feedScene)}&limit=10`, { token: session.token })
+    fetchFeedPage(feedScene, session.token, "", requestID)
       .then((data) => {
         if (!live) return;
         setSwipe(null);
-        setItems((data.items || []).map(mapFeedItem));
+        setItems((data.items || []).map((item) => mapFeedItem(item, feedScene, requestID)));
         setIndex(0);
         setCommentsOpen(false);
+        setNextCursor(data.next_cursor || "");
+        setHasMore(Boolean(data.has_more && data.next_cursor));
         setFeedState("ready");
       })
       .catch((error) => {
         if (!live) return;
-        if (error.status === 401 && feedScene === "following") {
+        if (error.status === 401 && requiresAuthFeed(feedScene)) {
           setItems([]);
           setIndex(0);
           setCommentsOpen(false);
+          setNextCursor("");
+          setHasMore(false);
           setFeedState("auth");
           return;
         }
@@ -388,6 +411,33 @@ function FeedPage({ feedScene, session, onNavigate }) {
       live = false;
     };
   }, [currentFeedScene.label, feedScene, session.token]);
+
+  const loadMoreFeed = useCallback(() => {
+    if (loadingMoreRef.current || feedState !== "ready" || !hasMore || !nextCursor || requiresAuthFeed(feedScene) && !session.token) {
+      return;
+    }
+
+    const requestID = feedRequestIDRef.current || feedRequestID || createFeedRequestID(feedScene);
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    fetchFeedPage(feedScene, session.token, nextCursor, requestID)
+      .then((data) => {
+        const nextItems = (data.items || []).map((item) => mapFeedItem(item, feedScene, requestID));
+        setItems((state) => appendFeedItems(state, nextItems));
+        setNextCursor(data.next_cursor || "");
+        setHasMore(Boolean(data.has_more && data.next_cursor));
+      })
+      .catch((error) => {
+        if (error.status === 401 && requiresAuthFeed(feedScene)) {
+          session.clearAuth();
+          onNavigate("/auth");
+        }
+      })
+      .finally(() => {
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      });
+  }, [feedRequestID, feedScene, feedState, hasMore, nextCursor, onNavigate, session]);
 
   useEffect(() => {
     if (!session.token) {
@@ -418,6 +468,12 @@ function FeedPage({ feedScene, session, onNavigate }) {
   }, [loadFeed]);
 
   useEffect(() => {
+    if (feedState === "ready" && items.length > 0 && index >= items.length - 3) {
+      loadMoreFeed();
+    }
+  }, [feedState, index, items.length, loadMoreFeed]);
+
+  useEffect(() => {
     return () => {
       if (transitionTimer.current) {
         window.clearTimeout(transitionTimer.current);
@@ -443,6 +499,32 @@ function FeedPage({ feedScene, session, onNavigate }) {
   const updateCurrentItem = useCallback((videoID, patch) => {
     setItems((state) => state.map((item) => (item.video_id === videoID ? { ...item, ...patch } : item)));
   }, []);
+
+  useEffect(() => {
+    if (!current || feedState !== "ready" || !session.token) return;
+    const scene = current.feed_scene || feedScene;
+    const requestID = current.request_id || feedRequestID;
+    const exposureKey = `${scene}:${requestID}:${current.video_id}`;
+    if (!requestID || exposedRef.current.has(exposureKey)) return;
+    exposedRef.current.add(exposureKey);
+    apiRequest("/api/video-view-events", {
+      method: "POST",
+      token: session.token,
+      body: {
+        video_id: current.video_id,
+        scene,
+        request_id: requestID,
+        event_type: "exposed",
+        watch_ms: 0,
+        completed: false
+      }
+    }).catch((error) => {
+      if (error.status === 401 && requiresAuthFeed(feedScene)) {
+        session.clearAuth();
+        onNavigate("/auth");
+      }
+    });
+  }, [current, feedRequestID, feedScene, feedState, onNavigate, session]);
 
   const requireLogin = useCallback(() => {
     if (session.token) return true;
@@ -764,7 +846,7 @@ function FeedPage({ feedScene, session, onNavigate }) {
       >
         {feedState === "loading" && <FeedMessage icon="hourglass_top" title={`正在加载${currentFeedScene.label}`} />}
         {feedState === "auth" && (
-          <FeedMessage icon="lock" title="登录后查看关注流" action="登录" onAction={() => onNavigate("/auth")} />
+          <FeedMessage icon="lock" title={`登录后查看${currentFeedScene.label}`} action="登录" onAction={() => onNavigate("/auth")} />
         )}
         {feedState === "error" && (
           <FeedMessage icon="sync_problem" title={feedError} action="重新加载" onAction={loadFeed} />
@@ -829,6 +911,10 @@ function FeedPage({ feedScene, session, onNavigate }) {
               )}
             </div>
           </div>
+        )}
+        {feedState === "ready" && loadingMore && <div className="feed-loading-pill">加载中</div>}
+        {feedState === "ready" && items.length > 0 && !hasMore && index === items.length - 1 && (
+          <div className="feed-loading-pill">已到末尾</div>
         )}
       </section>
       <CommentPanel
@@ -1773,7 +1859,7 @@ function normalizeRoute(pathname) {
   if (pathname === "/login") return "/auth";
   if (pathname === "/me") return "/profile";
   if (/^\/users\/\d+$/.test(pathname)) return pathname;
-  if (["/", "/auth", "/timeline", "/following", "/hotfeed", "/profile", "/upload"].includes(pathname)) return pathname;
+  if (["/", "/auth", "/recommend", "/timeline", "/following", "/hotfeed", "/profile", "/upload"].includes(pathname)) return pathname;
   return "/timeline";
 }
 
@@ -1797,6 +1883,51 @@ function logout(session, setRoute) {
   }
   session.clearAuth();
   navigate("/timeline", setRoute);
+}
+
+function requiresAuthFeed(scene) {
+  return scene === "following" || scene === "recommend";
+}
+
+function createFeedRequestID(scene) {
+  const random = Math.random().toString(36).slice(2, 8);
+  return `web-${scene}-${Date.now()}-${random}`;
+}
+
+async function fetchFeedPage(scene, token, cursor = "", requestID = "") {
+  const limit = 10;
+  if (scene === "recommend") {
+    return apiRequest("/api/feed-queries", {
+      method: "POST",
+      token,
+      body: {
+        scene,
+        cursor,
+        limit,
+        context: {
+          request_id: requestID
+        }
+      }
+    });
+  }
+
+  const params = new URLSearchParams({ scene, limit: String(limit) });
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  return apiRequest(`/api/feed-items?${params.toString()}`, { token });
+}
+
+function appendFeedItems(currentItems, nextItems) {
+  if (!nextItems.length) return currentItems;
+  const seen = new Set(currentItems.map((item) => item.video_id));
+  const merged = [...currentItems];
+  for (const item of nextItems) {
+    if (seen.has(item.video_id)) continue;
+    seen.add(item.video_id);
+    merged.push(item);
+  }
+  return merged;
 }
 
 function readStoredUser() {
@@ -1976,7 +2107,7 @@ function updateSessionRelationCount(session, followingCount) {
   });
 }
 
-function mapFeedItem(item) {
+function mapFeedItem(item, feedScene = "timeline", requestID = "") {
   return {
     video_id: item.video_id,
     author_id: item.author_id,
@@ -1988,7 +2119,9 @@ function mapFeedItem(item) {
     favorite_count: item.favorite_count,
     author: item.author_nickname || `创作者_${item.author_id}`,
     avatar_url: item.author_avatar_url || image.creator,
-    description: item.description || ""
+    description: item.description || "",
+    feed_scene: feedScene,
+    request_id: requestID
   };
 }
 

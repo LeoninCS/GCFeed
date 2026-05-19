@@ -846,6 +846,23 @@ textarea:focus {
   font-weight: 800;
 }
 
+.feed-loading-pill {
+  position: absolute;
+  z-index: 16;
+  top: 20px;
+  left: 50%;
+  min-height: 32px;
+  padding: 7px 14px;
+  color: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(19, 19, 21, 0.68);
+  backdrop-filter: blur(18px);
+  font-size: 13px;
+  font-weight: 800;
+  transform: translateX(-50%);
+}
+
 .comment-panel {
   position: absolute;
   z-index: 32;
