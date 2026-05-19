@@ -1,6 +1,7 @@
 package applicationrelation
 
 import (
+	domainfeed "GCFeed/internal/domain/feed"
 	domainrelation "GCFeed/internal/domain/relation"
 	"context"
 	"encoding/base64"
@@ -11,14 +12,26 @@ import (
 )
 
 const defaultListLimit = 20
+const defaultBackfillVideoLimit = 100
+const defaultBackfillInboxMaxLen = 1000
 
 var ErrLoadRelationFailed = errors.New("failed to load relation")
 var ErrUpdateRelationFailed = errors.New("failed to update relation")
+var ErrBackfillFollowFeedFailed = errors.New("failed to backfill follow feed")
 
 // Service 编排用户关系用例：关注、取关、关注列表和粉丝列表。
 type Service struct {
-	repo domainrelation.Repository
+	repo       domainrelation.Repository
+	backfiller FollowFeedBackfiller
 }
+
+type FollowFeedBackfiller interface {
+	CountFollowers(ctx context.Context, authorID int64) (int, error)
+	ListAuthorRecentVideos(ctx context.Context, authorID int64, limit int) ([]*domainfeed.FeedPageItem, error)
+	AddInboxItems(ctx context.Context, authorID int64, userIDs []int64, item *domainfeed.FeedPageItem, maxLen int64) error
+}
+
+type Option func(*Service)
 
 // FollowResult 是关注或取关后的关系状态和计数。
 type FollowResult struct {
@@ -43,8 +56,19 @@ type listCursorPayload struct {
 }
 
 // New 创建关系应用服务。
-func New(repo domainrelation.Repository) *Service {
-	return &Service{repo: repo}
+func New(repo domainrelation.Repository, options ...Option) *Service {
+	service := &Service{repo: repo}
+	for _, option := range options {
+		option(service)
+	}
+	return service
+}
+
+// WithFollowFeedBackfiller 为关注成功后的关注流索引启用回填。
+func WithFollowFeedBackfiller(backfiller FollowFeedBackfiller) Option {
+	return func(s *Service) {
+		s.backfiller = backfiller
+	}
 }
 
 // Follow 设置当前用户关注目标用户。
@@ -106,6 +130,11 @@ func (s *Service) setFollow(ctx context.Context, userID int64, targetUserID int6
 		}
 		return nil, ErrUpdateRelationFailed
 	}
+	if active && follow.Active() {
+		if err := s.backfillFollowFeed(ctx, userID, targetUserID); err != nil {
+			return nil, ErrBackfillFollowFeedFailed
+		}
+	}
 
 	return &FollowResult{
 		UserID:         follow.UserID,
@@ -115,6 +144,33 @@ func (s *Service) setFollow(ctx context.Context, userID int64, targetUserID int6
 		FollowingCount: userStat.FollowingCount,
 		FollowerCount:  targetStat.FollowerCount,
 	}, nil
+}
+
+func (s *Service) backfillFollowFeed(ctx context.Context, userID int64, targetUserID int64) error {
+	if s.backfiller == nil {
+		return nil
+	}
+	followerCount, err := s.backfiller.CountFollowers(ctx, targetUserID)
+	if err != nil {
+		return err
+	}
+	if followerCount >= domainfeed.BigCreatorFollowerThreshold {
+		return nil
+	}
+
+	items, err := s.backfiller.ListAuthorRecentVideos(ctx, targetUserID, defaultBackfillVideoLimit)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if err := s.backfiller.AddInboxItems(ctx, targetUserID, []int64{userID}, item, defaultBackfillInboxMaxLen); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func listResult(items []*domainrelation.UserItem, limit int) *ListResult {

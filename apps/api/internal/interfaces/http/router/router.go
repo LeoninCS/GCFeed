@@ -9,6 +9,7 @@ import (
 	applicationrecommendation "GCFeed/internal/application/recommendation"
 	applicationrelation "GCFeed/internal/application/relation"
 	applicationvideo "GCFeed/internal/application/video"
+	domainfeed "GCFeed/internal/domain/feed"
 	infracache "GCFeed/internal/infra/cache"
 	infraconfig "GCFeed/internal/infra/config"
 	infrajwt "GCFeed/internal/infra/jwt"
@@ -137,7 +138,11 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	exposureService := applicationexposure.New(exposureRepo, exposureOptions...)
 	exposureHandler := interfaceshttpexposure.New(exposureService)
 	relationRepo := infrarelation.New(gormDB)
-	relationService := applicationrelation.New(relationRepo)
+	relationOptions := []applicationrelation.Option{}
+	if feedCache != nil {
+		relationOptions = append(relationOptions, applicationrelation.WithFollowFeedBackfiller(NewFollowFeedBackfiller(feedRepo, feedCache)))
+	}
+	relationService := applicationrelation.New(relationRepo, relationOptions...)
 	relationHandler := interfaceshttprelation.New(relationService)
 	uploadHandler := interfaceshttpupload.New("./uploads")
 
@@ -195,6 +200,37 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	internal.POST("/exposures", recommendationHandler.SaveExposures)
 
 	return nil
+}
+
+type FollowFeedBackfiller struct {
+	feedRepo interface {
+		CountFollowers(ctx context.Context, authorID int64) (int, error)
+		ListAuthorRecentVideos(ctx context.Context, authorID int64, limit int) ([]*domainfeed.FeedPageItem, error)
+	}
+	feedCache interface {
+		AddInboxItems(ctx context.Context, authorID int64, userIDs []int64, item *domainfeed.FeedPageItem, maxLen int64) error
+	}
+}
+
+func NewFollowFeedBackfiller(feedRepo interface {
+	CountFollowers(ctx context.Context, authorID int64) (int, error)
+	ListAuthorRecentVideos(ctx context.Context, authorID int64, limit int) ([]*domainfeed.FeedPageItem, error)
+}, feedCache interface {
+	AddInboxItems(ctx context.Context, authorID int64, userIDs []int64, item *domainfeed.FeedPageItem, maxLen int64) error
+}) *FollowFeedBackfiller {
+	return &FollowFeedBackfiller{feedRepo: feedRepo, feedCache: feedCache}
+}
+
+func (b *FollowFeedBackfiller) CountFollowers(ctx context.Context, authorID int64) (int, error) {
+	return b.feedRepo.CountFollowers(ctx, authorID)
+}
+
+func (b *FollowFeedBackfiller) ListAuthorRecentVideos(ctx context.Context, authorID int64, limit int) ([]*domainfeed.FeedPageItem, error) {
+	return b.feedRepo.ListAuthorRecentVideos(ctx, authorID, limit)
+}
+
+func (b *FollowFeedBackfiller) AddInboxItems(ctx context.Context, authorID int64, userIDs []int64, item *domainfeed.FeedPageItem, maxLen int64) error {
+	return b.feedCache.AddInboxItems(ctx, authorID, userIDs, item, maxLen)
 }
 
 // HealthCheck 提供基础健康检查接口，方便本地调试和容器探活。

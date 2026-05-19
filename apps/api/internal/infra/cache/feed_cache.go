@@ -247,7 +247,6 @@ func (c *FeedCache) ListFollowingIndexPage(ctx context.Context, viewerID int64, 
 	if viewerID <= 0 || limit <= 0 {
 		return []*domainfeed.FeedPageItem{}, false, nil
 	}
-	allowedAuthors := int64Set(authorIDs)
 	keys := []string{followingInboxKey(viewerID)}
 	for _, authorID := range authorIDs {
 		if authorID > 0 {
@@ -292,7 +291,7 @@ func (c *FeedCache) ListFollowingIndexPage(ctx context.Context, viewerID int64, 
 
 	seen := map[int64]struct{}{}
 	items := make([]*domainfeed.FeedPageItem, 0, limit*len(rangeCommands))
-	for _, cmd := range rangeCommands {
+	for commandIndex, cmd := range rangeCommands {
 		members, err := cmd.Result()
 		if err != nil && err != redis.Nil {
 			return nil, false, err
@@ -302,7 +301,8 @@ func (c *FeedCache) ListFollowingIndexPage(ctx context.Context, viewerID int64, 
 			if !ok {
 				continue
 			}
-			if item.AuthorID > 0 {
+			if commandIndex > 0 && item.AuthorID > 0 {
+				allowedAuthors := int64Set(authorIDs)
 				if _, followed := allowedAuthors[item.AuthorID]; !followed {
 					continue
 				}
