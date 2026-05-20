@@ -37,6 +37,27 @@ type exposuresRequest struct {
 	VideoIDs  []int64 `json:"video_ids"`
 }
 
+type exposureDecisionsRequest struct {
+	UserID    int64   `json:"user_id"`
+	Scene     string  `json:"scene"`
+	RequestID string  `json:"request_id"`
+	VideoIDs  []int64 `json:"video_ids"`
+}
+
+type exposureDecisionsResponse struct {
+	UserID    int64                          `json:"user_id"`
+	Scene     string                         `json:"scene"`
+	RequestID string                         `json:"request_id,omitempty"`
+	Decisions []exposureDecisionItemResponse `json:"decisions"`
+}
+
+type exposureDecisionItemResponse struct {
+	VideoID       int64      `json:"video_id"`
+	Allowed       bool       `json:"allowed"`
+	Reason        string     `json:"reason"`
+	LastExposedAt *time.Time `json:"last_exposed_at,omitempty"`
+}
+
 type exposuresResponse struct {
 	Exposures []exposureItemResponse `json:"exposures"`
 }

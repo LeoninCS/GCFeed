@@ -68,6 +68,27 @@ func (h *Handler) SaveExposures(c *gin.Context) {
 	c.JSON(http.StatusCreated, exposuresResponseFromResult(result))
 }
 
+func (h *Handler) DecideExposures(c *gin.Context) {
+	var req exposureDecisionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	result, err := h.service.DecideExposures(c.Request.Context(), applicationrecommendation.ExposureDecisionInput{
+		UserID:    req.UserID,
+		Scene:     req.Scene,
+		RequestID: req.RequestID,
+		VideoIDs:  req.VideoIDs,
+	})
+	if err != nil {
+		writeRecommendationError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, exposureDecisionsResponseFromResult(result))
+}
+
 func candidateResponseFromResult(result *applicationrecommendation.CandidateResult) candidateResponse {
 	items := make([]candidateItemResponse, 0, len(result.Candidates))
 	for _, candidate := range result.Candidates {
@@ -105,6 +126,24 @@ func exposuresResponseFromResult(result *applicationrecommendation.ExposureResul
 		})
 	}
 	return exposuresResponse{Exposures: items}
+}
+
+func exposureDecisionsResponseFromResult(result *applicationrecommendation.ExposureDecisionResult) exposureDecisionsResponse {
+	items := make([]exposureDecisionItemResponse, 0, len(result.Decisions))
+	for _, decision := range result.Decisions {
+		items = append(items, exposureDecisionItemResponse{
+			VideoID:       decision.VideoID,
+			Allowed:       decision.Allowed,
+			Reason:        decision.Reason,
+			LastExposedAt: decision.LastExposedAt,
+		})
+	}
+	return exposureDecisionsResponse{
+		UserID:    result.UserID,
+		Scene:     result.Scene,
+		RequestID: result.RequestID,
+		Decisions: items,
+	}
 }
 
 func writeRecommendationError(c *gin.Context, err error) {

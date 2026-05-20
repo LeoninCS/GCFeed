@@ -9,6 +9,10 @@ import (
 const MaxLimit = 100
 const MaxSceneLength = 32
 const MaxRequestIDLength = 64
+const RecentExposureWindow = 7 * 24 * time.Hour
+
+const ExposureDecisionReasonFresh = "fresh"
+const ExposureDecisionReasonRecentlyExposed = "recently_exposed"
 
 type CandidateRequest struct {
 	UserID    int64
@@ -42,6 +46,13 @@ type ExposureWrite struct {
 	RequestID string
 }
 
+type ExposureDecisionRequest struct {
+	UserID    int64
+	Scene     string
+	RequestID string
+	VideoIDs  []int64
+}
+
 type Exposure struct {
 	ID             int64
 	UserID         int64
@@ -50,6 +61,13 @@ type Exposure struct {
 	LastExposedAt  time.Time
 	ExposureCount  int
 	LastScene      string
+}
+
+type ExposureDecision struct {
+	VideoID       int64
+	Allowed       bool
+	Reason        string
+	LastExposedAt *time.Time
 }
 
 func NewCandidateRequest(userID int64, scene string, requestID string, cursor *Cursor, limit int) (*CandidateRequest, error) {
@@ -79,6 +97,41 @@ func NewCandidateRequest(userID int64, scene string, requestID string, cursor *C
 		RequestID: requestID,
 		Cursor:    cursor,
 		Limit:     limit,
+	}, nil
+}
+
+func NewExposureDecisionRequest(userID int64, scene string, requestID string, videoIDs []int64) (*ExposureDecisionRequest, error) {
+	if userID <= 0 {
+		return nil, ErrInvalidUserID
+	}
+	scene = strings.TrimSpace(strings.ToLower(scene))
+	requestID = strings.TrimSpace(requestID)
+	if scene == "" {
+		return nil, ErrEmptyScene
+	}
+	if len(scene) > MaxSceneLength {
+		return nil, ErrSceneTooLong
+	}
+	if len(requestID) > MaxRequestIDLength {
+		return nil, ErrRequestIDTooLong
+	}
+	deduped := make([]int64, 0, len(videoIDs))
+	seen := map[int64]struct{}{}
+	for _, videoID := range videoIDs {
+		if videoID <= 0 {
+			return nil, ErrInvalidVideoID
+		}
+		if _, exists := seen[videoID]; exists {
+			continue
+		}
+		seen[videoID] = struct{}{}
+		deduped = append(deduped, videoID)
+	}
+	return &ExposureDecisionRequest{
+		UserID:    userID,
+		Scene:     scene,
+		RequestID: requestID,
+		VideoIDs:  deduped,
 	}, nil
 }
 
@@ -130,6 +183,20 @@ func RestoreExposure(id int64, userID int64, videoID int64, firstExposedAt time.
 		LastExposedAt:  lastExposedAt,
 		ExposureCount:  exposureCount,
 		LastScene:      strings.TrimSpace(lastScene),
+	}
+}
+
+func RestoreExposureDecision(videoID int64, allowed bool, reason string, lastExposedAt *time.Time) *ExposureDecision {
+	var exposedAt *time.Time
+	if lastExposedAt != nil {
+		value := *lastExposedAt
+		exposedAt = &value
+	}
+	return &ExposureDecision{
+		VideoID:       videoID,
+		Allowed:       allowed,
+		Reason:        strings.TrimSpace(reason),
+		LastExposedAt: exposedAt,
 	}
 }
 

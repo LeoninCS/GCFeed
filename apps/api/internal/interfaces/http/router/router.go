@@ -197,6 +197,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 
 	internal := g.Group("/internal")
 	internal.POST("/recommendation-candidates", recommendationHandler.ListCandidates)
+	internal.POST("/exposure-decisions", recommendationHandler.DecideExposures)
 	internal.POST("/exposures", recommendationHandler.SaveExposures)
 
 	return nil

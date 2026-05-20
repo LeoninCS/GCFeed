@@ -16,7 +16,6 @@ import (
 )
 
 const hotScoreExpression = "COALESCE(vs.like_count, 0) * 3 + COALESCE(vs.comment_count, 0) * 5 + COALESCE(vs.favorite_count, 0) * 4"
-const recentExposureWindow = 7 * 24 * time.Hour
 const positiveEventWindow = 30 * 24 * time.Hour
 
 type Repository struct {
@@ -52,7 +51,7 @@ func (r *Repository) ListCandidatePool(ctx context.Context, userID int64, limit 
 		Joins(
 			"LEFT JOIN exposures AS e ON e.user_id = ? AND e.video_id = v.id AND e.last_exposed_at >= ?",
 			userID,
-			time.Now().Add(-recentExposureWindow),
+			time.Now().Add(-domainrecommendation.RecentExposureWindow),
 		).
 		Where("v.status = ? AND v.published_at IS NOT NULL AND e.video_id IS NULL", domainvideo.StatusPublished).
 		Order("hot_score DESC").
@@ -157,6 +156,26 @@ func (r *Repository) LoadVideoVectors(ctx context.Context, videoIDs []int64) (ma
 		vectors[model.VideoID] = vector
 	}
 	return vectors, nil
+}
+
+func (r *Repository) ListRecentExposures(ctx context.Context, userID int64, videoIDs []int64, since time.Time) ([]*domainrecommendation.Exposure, error) {
+	if len(videoIDs) == 0 {
+		return []*domainrecommendation.Exposure{}, nil
+	}
+
+	var models []infraexposure.ExposureModel
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND video_id IN ? AND last_exposed_at >= ?", userID, videoIDs, since).
+		Find(&models).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	exposures := make([]*domainrecommendation.Exposure, 0, len(models))
+	for _, model := range models {
+		exposures = append(exposures, restoreExposure(model))
+	}
+	return exposures, nil
 }
 
 func (r *Repository) SaveExposures(ctx context.Context, writes []*domainrecommendation.ExposureWrite) ([]*domainrecommendation.Exposure, error) {

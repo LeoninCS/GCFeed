@@ -19,6 +19,7 @@ const minCandidatePoolSize = 50
 const maxCandidatePoolSize = 500
 
 var ErrLoadRecommendationFailed = errors.New("failed to load recommendations")
+var ErrLoadExposureDecisionsFailed = errors.New("failed to load exposure decisions")
 var ErrSaveRecommendationExposureFailed = errors.New("failed to save recommendation exposure")
 
 type Service struct {
@@ -50,6 +51,20 @@ type ExposureInput struct {
 	VideoID   int64
 	Scene     string
 	RequestID string
+}
+
+type ExposureDecisionInput struct {
+	UserID    int64
+	Scene     string
+	RequestID string
+	VideoIDs  []int64
+}
+
+type ExposureDecisionResult struct {
+	UserID    int64
+	Scene     string
+	RequestID string
+	Decisions []*domainrecommendation.ExposureDecision
 }
 
 type ExposureResult struct {
@@ -126,6 +141,57 @@ func (s *Service) Recommend(ctx context.Context, input CandidateRequest) (*Candi
 		Candidates: ranked,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
+	}, nil
+}
+
+func (s *Service) DecideExposures(ctx context.Context, input ExposureDecisionInput) (*ExposureDecisionResult, error) {
+	req, err := domainrecommendation.NewExposureDecisionRequest(input.UserID, input.Scene, input.RequestID, input.VideoIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(req.VideoIDs) == 0 {
+		return &ExposureDecisionResult{
+			UserID:    req.UserID,
+			Scene:     req.Scene,
+			RequestID: req.RequestID,
+			Decisions: []*domainrecommendation.ExposureDecision{},
+		}, nil
+	}
+
+	exposures, err := s.repo.ListRecentExposures(ctx, req.UserID, req.VideoIDs, s.now().Add(-domainrecommendation.RecentExposureWindow))
+	if err != nil {
+		return nil, ErrLoadExposureDecisionsFailed
+	}
+	exposureByVideoID := make(map[int64]*domainrecommendation.Exposure, len(exposures))
+	for _, exposure := range exposures {
+		if exposure != nil {
+			exposureByVideoID[exposure.VideoID] = exposure
+		}
+	}
+
+	decisions := make([]*domainrecommendation.ExposureDecision, 0, len(req.VideoIDs))
+	for _, videoID := range req.VideoIDs {
+		if exposure := exposureByVideoID[videoID]; exposure != nil {
+			decisions = append(decisions, domainrecommendation.RestoreExposureDecision(
+				videoID,
+				false,
+				domainrecommendation.ExposureDecisionReasonRecentlyExposed,
+				&exposure.LastExposedAt,
+			))
+			continue
+		}
+		decisions = append(decisions, domainrecommendation.RestoreExposureDecision(
+			videoID,
+			true,
+			domainrecommendation.ExposureDecisionReasonFresh,
+			nil,
+		))
+	}
+	return &ExposureDecisionResult{
+		UserID:    req.UserID,
+		Scene:     req.Scene,
+		RequestID: req.RequestID,
+		Decisions: decisions,
 	}, nil
 }
 

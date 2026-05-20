@@ -117,8 +117,8 @@ docker compose down -v
 | ✅ | 视频 | GET | `/api/users/me/videos` | 我的作品列表 |
 | ✅ | Feed | GET | `/api/feed-items` | 拉取视频流，支持 scene 和游标分页 |
 | ✅ | Feed | POST | `/api/video-view-events` | 上报曝光和观看事件 |
-| [ ] | 推荐 | POST | `/internal/recommendation-candidates` | 召回、排序、打散推荐候选 |
-| [ ] | 推荐 | POST | `/internal/exposures` | 写入曝光记录 |
+| ✅ | 推荐 | POST | `/internal/recommendation-candidates` | 召回、排序、打散推荐候选 |
+| ✅ | 推荐 | POST | `/internal/exposures` | 写入曝光记录 |
 | ✅ | 互动 | PUT | `/api/videos/{videoId}/like` | 点赞 |
 | ✅ | 互动 | DELETE | `/api/videos/{videoId}/like` | 取消点赞 |
 | ✅ | 互动 | POST | `/api/videos/{videoId}/comments` | 发表评论 |
@@ -144,7 +144,7 @@ docker compose down -v
 | ✅ | 上传 | POST | `/api/uploads` | 上传媒体文件 |
 | ✅ | Feed | GET | `/api/feed-items` | 刷新 Feed |
 | ✅ | Feed | POST | `/api/feed-queries` | 通过请求体查询复杂 Feed 场景 |
-| [ ] | 推荐 | POST | `/internal/exposure-decisions` | 曝光去重校验 |
+| ✅ | 推荐 | POST | `/internal/exposure-decisions` | 曝光去重校验 |
 | ✅ | 互动 | PUT | `/api/videos/{videoId}/favorite` | 收藏 |
 | ✅ | 互动 | DELETE | `/api/videos/{videoId}/favorite` | 取消收藏 |
 | ✅ | 互动 | DELETE | `/api/comments/{commentId}` | 删除评论 |
