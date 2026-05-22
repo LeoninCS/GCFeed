@@ -2,7 +2,6 @@ package interfaceshttprouter
 
 import (
 	applicationaccount "GCFeed/internal/application/account"
-	applicationembedding "GCFeed/internal/application/embedding"
 	applicationexposure "GCFeed/internal/application/exposure"
 	applicationfeed "GCFeed/internal/application/feed"
 	applicationinteraction "GCFeed/internal/application/interaction"
@@ -15,10 +14,10 @@ import (
 	infrajwt "GCFeed/internal/infra/jwt"
 	inframq "GCFeed/internal/infra/mq"
 	infraaccount "GCFeed/internal/infra/persistence/account"
-	infraembedding "GCFeed/internal/infra/persistence/embedding"
 	infraexposure "GCFeed/internal/infra/persistence/exposure"
 	infrafeed "GCFeed/internal/infra/persistence/feed"
 	infrainteraction "GCFeed/internal/infra/persistence/interaction"
+	migration "GCFeed/internal/infra/persistence/migration"
 	infrarecommendation "GCFeed/internal/infra/persistence/recommendation"
 	infrarelation "GCFeed/internal/infra/persistence/relation"
 	infravideo "GCFeed/internal/infra/persistence/video"
@@ -51,25 +50,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	}
 
 	// AutoMigrate 根据模型创建或补齐表结构，适合教学项目快速启动。
-	if err := gormDB.AutoMigrate(
-		&infraaccount.UserModel{},
-		&infraembedding.VideoEmbeddingModel{},
-		&infravideo.VideoModel{},
-		&infravideo.VideoStatModel{},
-		&infrafeed.InboxModel{},
-		&infraexposure.ViewEventModel{},
-		&infraexposure.ExposureModel{},
-		&infrainteraction.ActionModel{},
-		&infrainteraction.CommentModel{},
-		&infrarelation.FollowModel{},
-		&infrarelation.RelationStatModel{},
-	); err != nil {
-		return err
-	}
-	if err := infravideo.EnsureStats(gormDB); err != nil {
-		return err
-	}
-	if err := infrafeed.EnsureTimelineIndex(gormDB); err != nil {
+	if err := migration.AutoMigrate(gormDB); err != nil {
 		return err
 	}
 
@@ -83,8 +64,6 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	accountRepo := infraaccount.New(gormDB)
 	accountService := applicationaccount.New(accountRepo, jwtManager)
 	accountHandler := interfaceshttpaccount.New(accountService)
-	embeddingRepo := infraembedding.New(gormDB)
-	embeddingService := applicationembedding.New(embeddingRepo, nil)
 	videoRepo := infravideo.New(gormDB)
 	feedRepo := infrafeed.New(gormDB)
 	recommendationRepo := infrarecommendation.New(gormDB)
@@ -114,19 +93,6 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 			exposureOptions = append(exposureOptions, applicationexposure.WithViewEventPublisher(rabbitMQ))
 			if feedCache != nil {
 				interactionOptions = append(interactionOptions, applicationinteraction.WithAsyncActionPipeline(feedCache, rabbitMQ))
-				worker := applicationinteraction.NewActionWorker(interactionRepo, rabbitMQ)
-				if err := worker.Start(context.Background()); err != nil {
-					log.Printf("interaction action worker disabled: %v", err)
-				}
-				feedPreheater := applicationvideo.NewFeedPreheater(feedRepo, feedCache)
-				fanoutWorker := applicationvideo.NewFanoutWorker(feedRepo, rabbitMQ, feedCache, feedPreheater)
-				if err := fanoutWorker.Start(context.Background()); err != nil {
-					log.Printf("video fanout worker disabled: %v", err)
-				}
-			}
-			embeddingWorker := applicationembedding.NewVideoEmbeddingWorker(embeddingService, rabbitMQ)
-			if err := embeddingWorker.Start(context.Background()); err != nil {
-				log.Printf("video embedding worker disabled: %v", err)
 			}
 		}
 	}

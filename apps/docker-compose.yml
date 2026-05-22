@@ -67,6 +67,22 @@ services:
       retries: 12
       start_period: 20s
 
+  worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: gcfeed-worker
+    command: ["./gcfeed-worker"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - ./api/configs/config.docker.yaml:/app/configs/config.yaml:ro
+
   web:
     build:
       context: ./web
