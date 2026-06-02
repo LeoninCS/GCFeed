@@ -312,12 +312,13 @@ curl http://127.0.0.1:8080/health
 
 | 文档 | 适合什么时候读 |
 | --- | --- |
-| `README.md` | 看启动方式和功能清单 |
+| `README.md` | 看启动方式和文档入口 |
+| `docs/product.md` | 看产品范围、模块地图和功能状态 |
 | `docs/architecture.md` | 看系统图、分层图、核心链路图 |
-| `docs/sdd.md` | 新增代码前看工程规范 |
+| `docs/engineering.md` | 新增代码前看工程规范 |
 | `docs/modules/feed.md` | 深入 Feed、分页、热榜 |
 | `docs/modules/interaction.md` | 深入点赞、收藏、评论、异步落库 |
-| `docs/system optimization.md` | 理解高并发优化路线 |
+| `docs/optimization.md` | 理解高并发优化路线 |
 
 ## 11. 当前最值得关注的下一步
 

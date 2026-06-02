@@ -1,4 +1,4 @@
-# 关系模块设计（MVP）
+# 关系模块设计
 
 ## 1. 模块职责
 
@@ -14,7 +14,7 @@
 | `feed` | 后续可基于关注关系扩展关注流 |
 | `recommendation` | 后续可使用关注关系作为兴趣特征 |
 
-## 2. 目录建议
+## 2. 实现结构
 
 ```text
 apps/api/internal/domain/relation/

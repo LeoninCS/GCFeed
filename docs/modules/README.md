@@ -1,19 +1,33 @@
-# 模块文档索引（MVP）
+# 模块文档索引
 
-- 账户模块：`docs/modules/account.md`
-- 关系模块：`docs/modules/relation.md`
-- 视频模块：`docs/modules/video.md`
-- 推荐模块：`docs/modules/recommendation.md`
-- Feed 模块：`docs/modules/feed.md`
-- 互动模块：`docs/modules/interaction.md`
-- 消息模块：`docs/modules/message.md`
-- 审核模块：`docs/modules/review.md`
-- 后台运营模块：`docs/modules/admin.md`
-- 播放优化模块：`docs/modules/playback.md`
-- 系统治理模块：`docs/modules/governance.md`
-- 监控告警模块：`docs/modules/monitoring.md`
+本文是业务模块设计入口。产品范围和功能优先级见 [../product.md](../product.md)，工程实现规则见 [../engineering.md](../engineering.md)。
 
-最小实现原则：
-- 每个模块仅保留必要闭环能力，优先可上线而不是一次做全。
-- 接口数量控制在 2-5 个，覆盖核心读写。
-- 数据表优先 1-2 张主表（监控类可 3 张），字段只保留当前版本必需项。
+## 模块列表
+
+| 领域 | 模块 | 文档 | 状态 |
+| --- | --- | --- | --- |
+| 用户 | 账户 | [account.md](account.md) | 已实现 |
+| 用户 | 关系 | [relation.md](relation.md) | 已实现 |
+| 内容 | 视频 | [video.md](video.md) | 已实现 |
+| 内容 | 互动 | [interaction.md](interaction.md) | 已实现 |
+| 分发 | Feed | [feed.md](feed.md) | 已实现 |
+| 分发 | 推荐 | [recommendation.md](recommendation.md) | 已实现 |
+| 治理 | 审核 | [review.md](review.md) | 规划中 |
+| 治理 | 后台运营 | [admin.md](admin.md) | 规划中 |
+| 体验 | 消息 | [message.md](message.md) | 规划中 |
+| 体验 | 播放优化 | [playback.md](playback.md) | 规划中 |
+| 稳定性 | 系统治理 | [governance.md](governance.md) | 规划中 |
+| 稳定性 | 监控告警 | [monitoring.md](monitoring.md) | 规划中 |
+
+## 模块文档模板
+
+每个模块保持相同结构：
+
+1. 模块职责。
+2. 接口设计。
+3. 数据表设计。
+4. 业务规则。
+5. 测试建议。
+6. 前端接入点。
+
+已实现模块应补齐业务规则和测试建议。规划中模块先定义最小闭环能力，后续通过 OpenSpec change 细化实现方案。

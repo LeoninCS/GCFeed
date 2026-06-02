@@ -1,4 +1,4 @@
-# 互动模块设计（MVP）
+# 互动模块设计
 
 ## 1. 模块职责
 
@@ -13,7 +13,7 @@
 | `video_stat` | 保存 `like_count`、`favorite_count`、`comment_count` 统计字段 |
 | `account` | 提供登录用户身份，评论响应展示用户昵称和头像 |
 
-## 2. 目录建议
+## 2. 实现结构
 
 ```text
 apps/api/internal/domain/interaction/
@@ -379,7 +379,7 @@ apps/api/internal/interfaces/http/interaction/
 
 写接口读取请求头 `Idempotency-Key`。同一用户、同一接口、同一幂等键命中时返回首次执行结果。
 
-MVP 实现建议：
+当前实现建议：
 
 | 场景 | 处理方式 |
 | --- | --- |

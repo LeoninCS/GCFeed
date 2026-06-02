@@ -3,7 +3,7 @@
 > 版本：1.0  
 > 日期：2026-05-03  
 > 产品定位：电脑 Web 端短视频 Feed + 完整运营后台  
-> 关联文档：`README.md`、`docs/product.md`、`docs/architecture.md`、`docs/modules/*.md`
+> 关联文档：`README.md`、`docs/product.md`、`docs/architecture.md`、`docs/engineering.md`、`docs/modules/*.md`
 
 ## 0. 快速摘要
 
