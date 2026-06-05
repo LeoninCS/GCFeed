@@ -6,6 +6,7 @@ import (
 	applicationfeed "GCFeed/internal/application/feed"
 	applicationinteraction "GCFeed/internal/application/interaction"
 	applicationmessage "GCFeed/internal/application/message"
+	applicationplayback "GCFeed/internal/application/playback"
 	applicationrecommendation "GCFeed/internal/application/recommendation"
 	applicationrelation "GCFeed/internal/application/relation"
 	applicationvideo "GCFeed/internal/application/video"
@@ -20,6 +21,7 @@ import (
 	infrainteraction "GCFeed/internal/infra/persistence/interaction"
 	inframessage "GCFeed/internal/infra/persistence/message"
 	migration "GCFeed/internal/infra/persistence/migration"
+	infraplayback "GCFeed/internal/infra/persistence/playback"
 	infrarecommendation "GCFeed/internal/infra/persistence/recommendation"
 	infrarelation "GCFeed/internal/infra/persistence/relation"
 	infravideo "GCFeed/internal/infra/persistence/video"
@@ -29,6 +31,7 @@ import (
 	interfaceshttpinteraction "GCFeed/internal/interfaces/http/interaction"
 	interfaceshttpmessage "GCFeed/internal/interfaces/http/message"
 	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
+	interfaceshttpplayback "GCFeed/internal/interfaces/http/playback"
 	interfaceshttprecommendation "GCFeed/internal/interfaces/http/recommendation"
 	interfaceshttprelation "GCFeed/internal/interfaces/http/relation"
 	interfaceshttpupload "GCFeed/internal/interfaces/http/upload"
@@ -90,6 +93,9 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	messageRepo := inframessage.New(gormDB)
 	messageService := applicationmessage.New(messageRepo)
 	messageHandler := interfaceshttpmessage.New(messageService)
+	playbackRepo := infraplayback.New(gormDB)
+	playbackService := applicationplayback.New(playbackRepo)
+	playbackHandler := interfaceshttpplayback.New(playbackService)
 	if cfg.RabbitMQ.URL != "" {
 		rabbitMQ, err = inframq.NewRabbitMQ(cfg.RabbitMQ)
 		if err != nil {
@@ -171,12 +177,16 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	api.GET("/messages", authMiddleware, messageHandler.List)
 	api.PATCH("/messages", authMiddleware, messageHandler.MarkRead)
 	api.GET("/message-stats/unread", authMiddleware, messageHandler.CountUnread)
+	api.GET("/playback-config", authMiddleware, playbackHandler.GetConfig)
+	api.GET("/preload-videos", authMiddleware, playbackHandler.ListPreloadVideos)
+	api.POST("/playback-qos-reports", authMiddleware, playbackHandler.CreateQoSReport)
 
 	internal := g.Group("/internal")
 	internal.POST("/recommendation-candidates", recommendationHandler.ListCandidates)
 	internal.POST("/exposure-decisions", recommendationHandler.DecideExposures)
 	internal.POST("/exposures", recommendationHandler.SaveExposures)
 	internal.POST("/messages", interfaceshttpmiddleware.NewInternalTokenAuth(cfg.Internal.Token), messageHandler.Create)
+	internal.POST("/playback-qos-reports", interfaceshttpmiddleware.NewInternalTokenAuth(cfg.Internal.Token), playbackHandler.CreateInternalQoSReport)
 
 	return nil
 }

@@ -4,6 +4,12 @@ const TOKEN_KEY = "gcfeed.accessToken";
 const USER_KEY = "gcfeed.user";
 const PUBLIC_PROFILE_KEY = "gcfeed.publicProfiles";
 const FEED_TRANSITION_MS = 320;
+const DEFAULT_PLAYBACK_CONFIG = {
+  platform: "Web",
+  network_type: "DEFAULT",
+  preload_count: 3,
+  buffer_ms: 1200
+};
 const FEED_SCENES = [
   { key: "recommend", label: "推荐流", route: "/recommend", icon: "auto_awesome" },
   { key: "timeline", label: "最新视频", route: "/timeline", icon: "home" },
@@ -400,6 +406,7 @@ function FeedPage({ feedScene, session, onNavigate }) {
   const [nextCursor, setNextCursor] = useState("");
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [playbackConfig, setPlaybackConfig] = useState(DEFAULT_PLAYBACK_CONFIG);
   const [feedRequestID, setFeedRequestID] = useState("");
   const [swipe, setSwipe] = useState(null);
   const wheelLocked = useRef(false);
@@ -410,6 +417,7 @@ function FeedPage({ feedScene, session, onNavigate }) {
   const loadingMoreRef = useRef(false);
   const feedRequestIDRef = useRef("");
   const exposedRef = useRef(new Set());
+  const preloadedVideoRef = useRef(new Set());
   const currentFeedScene = FEED_SCENES.find((scene) => scene.key === feedScene) || FEED_SCENES[0];
 
   const loadFeed = useCallback(() => {
@@ -526,6 +534,35 @@ function FeedPage({ feedScene, session, onNavigate }) {
   }, [loadFeed]);
 
   useEffect(() => {
+    if (!session.token) {
+      setPlaybackConfig(DEFAULT_PLAYBACK_CONFIG);
+      preloadedVideoRef.current = new Set();
+      return undefined;
+    }
+
+    let live = true;
+    fetchPlaybackConfig(session.token)
+      .then((config) => {
+        if (live) {
+          setPlaybackConfig(normalizePlaybackConfig(config));
+        }
+      })
+      .catch((error) => {
+        if (error.status === 401) {
+          session.clearAuth();
+          onNavigate("/auth");
+          return;
+        }
+        if (live) {
+          setPlaybackConfig(DEFAULT_PLAYBACK_CONFIG);
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [onNavigate, session.clearAuth, session.token]);
+
+  useEffect(() => {
     if (feedState === "ready" && items.length > 0 && index >= items.length - 3) {
       loadMoreFeed();
     }
@@ -583,6 +620,50 @@ function FeedPage({ feedScene, session, onNavigate }) {
       }
     });
   }, [current, feedRequestID, feedScene, feedState, onNavigate, session]);
+
+  useEffect(() => {
+    if (!current || feedState !== "ready" || !session.token) return undefined;
+    let live = true;
+    fetchPreloadVideos(session.token, current.video_id, playbackConfig.preload_count)
+      .then((data) => {
+        if (!live) return;
+        prewarmVideoAssets(data.items || [], preloadedVideoRef.current);
+      })
+      .catch((error) => {
+        if (error.status === 401 && requiresAuthFeed(feedScene)) {
+          session.clearAuth();
+          onNavigate("/auth");
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [current?.video_id, feedScene, feedState, onNavigate, playbackConfig.preload_count, session.clearAuth, session.token]);
+
+  const reportPlaybackQoS = useCallback(
+    (item, metrics) => {
+      if (!session.token || !item?.video_id) return;
+      const payload = buildPlaybackQoSPayload(metrics);
+      if (!payload) return;
+      apiRequest("/api/playback-qos-reports", {
+        method: "POST",
+        token: session.token,
+        headers: {
+          "Idempotency-Key": createPlaybackQoSKey(item, metrics)
+        },
+        body: {
+          video_id: item.video_id,
+          ...payload
+        }
+      }).catch((error) => {
+        if (error.status === 401) {
+          session.clearAuth();
+          onNavigate("/auth");
+        }
+      });
+    },
+    [onNavigate, session.clearAuth, session.token]
+  );
 
   const requireLogin = useCallback(() => {
     if (session.token) return true;
@@ -919,6 +1000,7 @@ function FeedPage({ feedScene, session, onNavigate }) {
                 <div className="feed-stage-layer">
                   <VideoStage
                     item={visibleNext}
+                    active={false}
                     liked={Boolean(liked[visibleNext.video_id])}
                     favorited={Boolean(favorited[visibleNext.video_id])}
                     following={Boolean(following[visibleNext.author_id])}
@@ -928,6 +1010,7 @@ function FeedPage({ feedScene, session, onNavigate }) {
                     onComment={() => setCommentsOpen(true)}
                     onFavorite={setFavorite}
                     onFollow={setFollow}
+                    onPlaybackQoS={reportPlaybackQoS}
                     onOpenAuthor={(author) => openPublicProfile(author, onNavigate)}
                     followError={followError}
                   />
@@ -936,6 +1019,7 @@ function FeedPage({ feedScene, session, onNavigate }) {
               <div className="feed-stage-layer">
                 <VideoStage
                   item={visibleCurrent}
+                  active={!swipe}
                   liked={Boolean(liked[visibleCurrent.video_id])}
                   favorited={Boolean(favorited[visibleCurrent.video_id])}
                   following={Boolean(following[visibleCurrent.author_id])}
@@ -945,6 +1029,7 @@ function FeedPage({ feedScene, session, onNavigate }) {
                   onComment={() => setCommentsOpen(true)}
                   onFavorite={setFavorite}
                   onFollow={setFollow}
+                  onPlaybackQoS={reportPlaybackQoS}
                   onOpenAuthor={(author) => openPublicProfile(author, onNavigate)}
                   followError={followError}
                 />
@@ -953,6 +1038,7 @@ function FeedPage({ feedScene, session, onNavigate }) {
                 <div className="feed-stage-layer">
                   <VideoStage
                     item={visibleNext}
+                    active={false}
                     liked={Boolean(liked[visibleNext.video_id])}
                     favorited={Boolean(favorited[visibleNext.video_id])}
                     following={Boolean(following[visibleNext.author_id])}
@@ -962,6 +1048,7 @@ function FeedPage({ feedScene, session, onNavigate }) {
                     onComment={() => setCommentsOpen(true)}
                     onFavorite={setFavorite}
                     onFollow={setFollow}
+                    onPlaybackQoS={reportPlaybackQoS}
                     onOpenAuthor={(author) => openPublicProfile(author, onNavigate)}
                     followError={followError}
                   />
@@ -1006,6 +1093,7 @@ function FeedMessage({ icon, title, action, onAction }) {
 
 function VideoStage({
   item,
+  active,
   liked,
   favorited,
   following,
@@ -1016,18 +1104,106 @@ function VideoStage({
   onComment,
   onFavorite,
   onFollow,
+  onPlaybackQoS,
   onOpenAuthor
 }) {
   const cover = item.cover_url || image.stage;
   const media = item.media_url || cover;
   const showVideo = isVideoSource(media);
+  const videoRef = useRef(null);
+  const itemRef = useRef(item);
+  const qosRef = useRef(createVideoQoSState(item.video_id));
+
+  useEffect(() => {
+    itemRef.current = item;
+  }, [item]);
+
+  const flushQoS = useCallback(() => {
+    const state = qosRef.current;
+    if (!state || !state.playingStartedAt) return;
+    const watchMs = Math.max(0, Math.round(performance.now() - state.playingStartedAt));
+    if (watchMs <= 0 && state.stutterCount <= 0 && state.firstFrameMs === undefined) return;
+    onPlaybackQoS?.(itemRef.current, {
+      firstFrameMs: state.firstFrameMs,
+      stutterCount: state.stutterCount,
+      watchMs,
+      reportID: state.reportID
+    });
+    qosRef.current = {
+      ...createVideoQoSState(itemRef.current.video_id),
+      loadStartedAt: performance.now()
+    };
+  }, [onPlaybackQoS]);
+
+  useEffect(() => {
+    qosRef.current = createVideoQoSState(item.video_id);
+    if (active && showVideo) {
+      qosRef.current.loadStartedAt = performance.now();
+    }
+    return () => {
+      flushQoS();
+    };
+  }, [active, flushQoS, item.video_id, showVideo]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !showVideo) return;
+    if (active) {
+      const playback = video.play();
+      if (playback?.catch) {
+        playback.catch(() => {});
+      }
+      return;
+    }
+    video.pause();
+  }, [active, media, showVideo]);
+
+  function handleLoadedData() {
+    const state = qosRef.current;
+    if (!active || !state || state.firstFrameMs !== undefined) return;
+    const startedAt = state.loadStartedAt || performance.now();
+    state.firstFrameMs = Math.max(0, Math.round(performance.now() - startedAt));
+  }
+
+  function handlePlaying() {
+    const state = qosRef.current;
+    if (!active || !state) return;
+    if (!state.loadStartedAt) {
+      state.loadStartedAt = performance.now();
+    }
+    if (!state.playingStartedAt) {
+      state.playingStartedAt = performance.now();
+    }
+  }
+
+  function handleWaiting() {
+    const state = qosRef.current;
+    if (!active || !state) return;
+    state.stutterCount += 1;
+  }
 
   return (
     <article className="video-stage">
       <img className="stage-backdrop" src={cover} alt="" />
       <div className="stage-vignette" />
       {showVideo ? (
-        <video className="stage-media" src={media} poster={cover} autoPlay muted loop playsInline controls />
+        <video
+          ref={videoRef}
+          className="stage-media"
+          src={media}
+          poster={cover}
+          autoPlay={active}
+          muted
+          loop
+          playsInline
+          controls
+          preload={active ? "metadata" : "none"}
+          onLoadedData={handleLoadedData}
+          onPlaying={handlePlaying}
+          onWaiting={handleWaiting}
+          onPause={flushQoS}
+          onEnded={flushQoS}
+        />
       ) : (
         <img className="stage-media portrait-media" src={media} alt="" />
       )}
@@ -2144,6 +2320,22 @@ async function fetchMessages(token, cursor = "") {
   return apiRequest(`/api/messages?${params.toString()}`, { token });
 }
 
+async function fetchPlaybackConfig(token) {
+  const params = new URLSearchParams({
+    platform: "Web",
+    network_type: detectNetworkType()
+  });
+  return apiRequest(`/api/playback-config?${params.toString()}`, { token });
+}
+
+async function fetchPreloadVideos(token, currentVideoID, limit) {
+  const params = new URLSearchParams({
+    current_video_id: String(currentVideoID || 0),
+    limit: String(limit || DEFAULT_PLAYBACK_CONFIG.preload_count)
+  });
+  return apiRequest(`/api/preload-videos?${params.toString()}`, { token });
+}
+
 async function markMessagesRead(token, messageIDs = []) {
   return apiRequest("/api/messages", {
     method: "PATCH",
@@ -2176,6 +2368,104 @@ function appendMessages(currentItems, nextItems) {
     merged.push(item);
   }
   return merged;
+}
+
+function normalizePlaybackConfig(config) {
+  const preloadCount = Number(config?.preload_count);
+  const bufferMs = Number(config?.buffer_ms);
+  return {
+    platform: config?.platform || DEFAULT_PLAYBACK_CONFIG.platform,
+    network_type: config?.network_type || DEFAULT_PLAYBACK_CONFIG.network_type,
+    preload_count: Number.isFinite(preloadCount) ? Math.max(1, Math.min(10, preloadCount)) : DEFAULT_PLAYBACK_CONFIG.preload_count,
+    buffer_ms: Number.isFinite(bufferMs) && bufferMs > 0 ? bufferMs : DEFAULT_PLAYBACK_CONFIG.buffer_ms
+  };
+}
+
+function detectNetworkType() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  const raw = String(connection?.effectiveType || connection?.type || "").toLowerCase();
+  if (raw.includes("wifi")) return "WiFi";
+  if (raw.includes("5g")) return "5G";
+  if (raw.includes("4g")) return "4G";
+  if (raw.includes("3g")) return "3G";
+  return DEFAULT_PLAYBACK_CONFIG.network_type;
+}
+
+function prewarmVideoAssets(items, loadedSet) {
+  for (const item of items) {
+    const coverKey = `cover:${item.cover_url || ""}`;
+    if (item.cover_url && !loadedSet.has(coverKey)) {
+      const imagePreload = new Image();
+      imagePreload.src = item.cover_url;
+      loadedSet.add(coverKey);
+    }
+    prewarmVideoMetadata(item.media_url, loadedSet);
+  }
+}
+
+function prewarmVideoMetadata(url, loadedSet) {
+  const mediaURL = String(url || "").trim();
+  const mediaKey = `metadata:${mediaURL}`;
+  if (!mediaURL || loadedSet.has(mediaKey) || typeof document === "undefined") return;
+  loadedSet.add(mediaKey);
+
+  const probe = document.createElement("video");
+  probe.preload = "metadata";
+  probe.src = mediaURL;
+  probe.muted = true;
+  probe.playsInline = true;
+  probe.setAttribute("aria-hidden", "true");
+  probe.style.position = "absolute";
+  probe.style.width = "1px";
+  probe.style.height = "1px";
+  probe.style.opacity = "0";
+  probe.style.pointerEvents = "none";
+
+  let timer = 0;
+  const cleanup = () => {
+    window.clearTimeout(timer);
+    probe.removeEventListener("loadedmetadata", cleanup);
+    probe.removeEventListener("canplay", cleanup);
+    probe.removeEventListener("error", cleanup);
+    probe.removeAttribute("src");
+    probe.load();
+    probe.remove();
+  };
+
+  probe.addEventListener("loadedmetadata", cleanup);
+  probe.addEventListener("canplay", cleanup);
+  probe.addEventListener("error", cleanup);
+  timer = window.setTimeout(cleanup, 4000);
+  document.body.appendChild(probe);
+  probe.load();
+}
+
+function createVideoQoSState(videoID) {
+  return {
+    videoID,
+    reportID: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    loadStartedAt: 0,
+    playingStartedAt: 0,
+    firstFrameMs: undefined,
+    stutterCount: 0
+  };
+}
+
+function buildPlaybackQoSPayload(metrics) {
+  const watchMs = Math.max(0, Math.round(Number(metrics?.watchMs || 0)));
+  const stutterCount = Math.max(0, Math.round(Number(metrics?.stutterCount || 0)));
+  const firstFrameNumber = Number(metrics?.firstFrameMs);
+  const firstFrameMs = Number.isFinite(firstFrameNumber) ? Math.max(0, Math.round(firstFrameNumber)) : undefined;
+  if (watchMs <= 0 && stutterCount <= 0 && firstFrameMs === undefined) return null;
+  return {
+    ...(firstFrameMs === undefined ? {} : { first_frame_ms: firstFrameMs }),
+    stutter_count: stutterCount,
+    watch_ms: watchMs
+  };
+}
+
+function createPlaybackQoSKey(item, metrics) {
+  return `web-qos-${item.video_id}-${metrics?.reportID || Date.now()}`;
 }
 
 function readStoredUser() {
