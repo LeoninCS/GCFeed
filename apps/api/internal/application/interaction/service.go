@@ -2,6 +2,7 @@ package applicationinteraction
 
 import (
 	domaininteraction "GCFeed/internal/domain/interaction"
+	domainmessage "GCFeed/internal/domain/message"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -27,6 +28,7 @@ type Service struct {
 	hotScoreRecorder HotScoreRecorder
 	actionStateStore ActionStateStore
 	actionPublisher  ActionEventPublisher
+	messageWriter    MessageWriter
 }
 
 // HotScoreRecorder 把互动变化投递到热榜分钟桶。
@@ -54,6 +56,11 @@ type ActionStateStore interface {
 // ActionEventPublisher 投递点赞收藏变更事件。
 type ActionEventPublisher interface {
 	PublishActionChanged(ctx context.Context, event *ActionChangedEvent) error
+}
+
+// MessageWriter 写入互动触发的站内消息。
+type MessageWriter interface {
+	CreateFromEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string) (any, error)
 }
 
 type ActionChangedEvent struct {
@@ -119,6 +126,13 @@ func WithAsyncActionPipeline(store ActionStateStore, publisher ActionEventPublis
 	}
 }
 
+// WithMessageWriter 为点赞和评论成功后的通知写入启用消息中心。
+func WithMessageWriter(writer MessageWriter) Option {
+	return func(s *Service) {
+		s.messageWriter = writer
+	}
+}
+
 // Like 设置用户对视频的点赞状态为有效。
 func (s *Service) Like(ctx context.Context, userID int64, videoID int64, idempotencyKey string) (*ActionResult, error) {
 	return s.setAction(ctx, userID, videoID, domaininteraction.ActionTypeLike, true, idempotencyKey)
@@ -170,6 +184,9 @@ func (s *Service) CreateComment(ctx context.Context, userID int64, videoID int64
 		return nil, ErrSaveInteractionFailed
 	}
 	s.recordHotScore(ctx, created.VideoID, delta*hotScoreCommentWeight)
+	if delta > 0 {
+		s.notifyComment(ctx, created)
+	}
 
 	return &CreateCommentResult{Comment: created, CommentCount: count}, nil
 }
@@ -281,6 +298,14 @@ func (s *Service) setActionAsync(ctx context.Context, userID int64, videoID int6
 			return s.setActionSync(ctx, userID, videoID, actionType, active, idempotencyKey)
 		}
 		s.recordActionHotScore(ctx, state.VideoID, state.ActionType, state.Delta)
+		if state.ActionType == domaininteraction.ActionTypeLike && state.Active && state.Delta > 0 {
+			s.notifyLike(ctx, &domaininteraction.Action{
+				UserID:     userID,
+				VideoID:    state.VideoID,
+				ActionType: state.ActionType,
+				Status:     domaininteraction.ActionStatusActive,
+			})
+		}
 	}
 
 	return &ActionResult{
@@ -312,6 +337,9 @@ func (s *Service) setActionSync(ctx context.Context, userID int64, videoID int64
 		result.FavoriteCount = count
 	}
 	s.recordActionHotScore(ctx, action.VideoID, action.ActionType, delta)
+	if action.ActionType == domaininteraction.ActionTypeLike && action.Active() && delta > 0 {
+		s.notifyLike(ctx, action)
+	}
 	return result, nil
 }
 
@@ -348,6 +376,46 @@ func NewActionChangedEvent(userID int64, videoID int64, actionType string, activ
 		IdempotencyKey: strings.TrimSpace(idempotencyKey),
 		OccurredAt:     time.Now().UTC(),
 	}
+}
+
+func (s *Service) notifyLike(ctx context.Context, action *domaininteraction.Action) {
+	if s.messageWriter == nil || action == nil {
+		return
+	}
+	authorID, err := s.repo.GetVideoAuthorID(ctx, action.VideoID)
+	if err != nil || authorID == action.UserID {
+		return
+	}
+	eventID := fmt.Sprintf("interaction:like:%d:%d", action.VideoID, action.UserID)
+	_, _ = s.messageWriter.CreateFromEvent(
+		ctx,
+		authorID,
+		domainmessage.TypeLike,
+		"收到点赞",
+		fmt.Sprintf("用户 %d 点赞了你的视频 %d", action.UserID, action.VideoID),
+		eventID,
+		eventID,
+	)
+}
+
+func (s *Service) notifyComment(ctx context.Context, comment *domaininteraction.Comment) {
+	if s.messageWriter == nil || comment == nil {
+		return
+	}
+	authorID, err := s.repo.GetVideoAuthorID(ctx, comment.VideoID)
+	if err != nil || authorID == comment.UserID {
+		return
+	}
+	eventID := fmt.Sprintf("interaction:comment:%d", comment.ID)
+	_, _ = s.messageWriter.CreateFromEvent(
+		ctx,
+		authorID,
+		domainmessage.TypeComment,
+		"收到评论",
+		fmt.Sprintf("用户 %d 评论了你的视频 %d", comment.UserID, comment.VideoID),
+		eventID,
+		eventID,
+	)
 }
 
 func newEventID() string {

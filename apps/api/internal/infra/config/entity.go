@@ -4,6 +4,7 @@ package infraconfig
 type Config struct {
 	Port     int            `yaml:"port"`
 	JWT      JWTConfig      `yaml:"jwt"`
+	Internal InternalConfig `yaml:"internal"`
 	Database DatabaseConfig `yaml:"database"`
 	Redis    RedisConfig    `yaml:"redis"`
 	RabbitMQ RabbitMQConfig `yaml:"rabbitmq"`
@@ -13,6 +14,11 @@ type Config struct {
 type JWTConfig struct {
 	Secret    string `yaml:"secret"`
 	AccessTTL string `yaml:"access_ttl"`
+}
+
+// InternalConfig 保存内部接口服务鉴权配置。
+type InternalConfig struct {
+	Token string `yaml:"token"`
 }
 
 // DatabaseConfig 保存 MySQL 连接参数。

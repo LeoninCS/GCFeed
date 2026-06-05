@@ -2,11 +2,13 @@ package applicationrelation
 
 import (
 	domainfeed "GCFeed/internal/domain/feed"
+	domainmessage "GCFeed/internal/domain/message"
 	domainrelation "GCFeed/internal/domain/relation"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -21,8 +23,9 @@ var ErrBackfillFollowFeedFailed = errors.New("failed to backfill follow feed")
 
 // Service 编排用户关系用例：关注、取关、关注列表和粉丝列表。
 type Service struct {
-	repo       domainrelation.Repository
-	backfiller FollowFeedBackfiller
+	repo          domainrelation.Repository
+	backfiller    FollowFeedBackfiller
+	messageWriter MessageWriter
 }
 
 type FollowFeedBackfiller interface {
@@ -32,6 +35,11 @@ type FollowFeedBackfiller interface {
 }
 
 type Option func(*Service)
+
+// MessageWriter 写入关注触发的站内消息。
+type MessageWriter interface {
+	CreateFromEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string) (any, error)
+}
 
 // FollowResult 是关注或取关后的关系状态和计数。
 type FollowResult struct {
@@ -68,6 +76,13 @@ func New(repo domainrelation.Repository, options ...Option) *Service {
 func WithFollowFeedBackfiller(backfiller FollowFeedBackfiller) Option {
 	return func(s *Service) {
 		s.backfiller = backfiller
+	}
+}
+
+// WithMessageWriter 为关注成功后的通知写入启用消息中心。
+func WithMessageWriter(writer MessageWriter) Option {
+	return func(s *Service) {
+		s.messageWriter = writer
 	}
 }
 
@@ -134,6 +149,7 @@ func (s *Service) setFollow(ctx context.Context, userID int64, targetUserID int6
 		if err := s.backfillFollowFeed(ctx, userID, targetUserID); err != nil {
 			return nil, ErrBackfillFollowFeedFailed
 		}
+		s.notifyFollow(ctx, userID, targetUserID)
 	}
 
 	return &FollowResult{
@@ -144,6 +160,22 @@ func (s *Service) setFollow(ctx context.Context, userID int64, targetUserID int6
 		FollowingCount: userStat.FollowingCount,
 		FollowerCount:  targetStat.FollowerCount,
 	}, nil
+}
+
+func (s *Service) notifyFollow(ctx context.Context, userID int64, targetUserID int64) {
+	if s.messageWriter == nil {
+		return
+	}
+	eventID := fmt.Sprintf("relation:follow:%d:%d", targetUserID, userID)
+	_, _ = s.messageWriter.CreateFromEvent(
+		ctx,
+		targetUserID,
+		domainmessage.TypeFollow,
+		"新增关注",
+		fmt.Sprintf("用户 %d 关注了你", userID),
+		eventID,
+		eventID,
+	)
 }
 
 func (s *Service) backfillFollowFeed(ctx context.Context, userID int64, targetUserID int64) error {

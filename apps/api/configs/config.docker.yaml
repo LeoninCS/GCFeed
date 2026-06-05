@@ -3,6 +3,9 @@ jwt:
   secret: "replace-with-strong-secret"
   access_ttl: "15m"
 
+internal:
+  token: "replace-with-internal-token"
+
 database:
   host: "mysql"
   port: 3306

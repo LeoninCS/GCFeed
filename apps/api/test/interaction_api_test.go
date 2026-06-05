@@ -88,6 +88,18 @@ type memoryActionPipeline struct {
 	events []*applicationinteraction.ActionChangedEvent
 }
 
+type memoryInteractionMessageWriter struct {
+	mu       sync.Mutex
+	messages []memoryInteractionMessage
+}
+
+type memoryInteractionMessage struct {
+	UserID  int64
+	Type    string
+	Title   string
+	EventID string
+}
+
 func newMemoryInteractionRepo() *memoryInteractionRepo {
 	return &memoryInteractionRepo{
 		nextActionID:  1,
@@ -118,6 +130,17 @@ func (r *memoryInteractionRepo) GetVideoStat(ctx context.Context, videoID int64)
 		CommentCount:  stat.CommentCount,
 		FavoriteCount: stat.FavoriteCount,
 	}, nil
+}
+
+// GetVideoAuthorID 模拟读取公开视频作者。
+func (r *memoryInteractionRepo) GetVideoAuthorID(ctx context.Context, videoID int64) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if !r.videoPublished(videoID) {
+		return 0, domaininteraction.ErrVideoNotFound
+	}
+	return r.videos[videoID].AuthorID, nil
 }
 
 // SetAction 模拟点赞/收藏状态变更，并维护对应计数。
@@ -426,6 +449,37 @@ func TestInteractionHotScoreRecorder(t *testing.T) {
 	}
 }
 
+// TestInteractionMessageWriter 覆盖点赞和评论成功后给视频作者写消息。
+func TestInteractionMessageWriter(t *testing.T) {
+	repo := newMemoryInteractionRepo()
+	writer := newMemoryInteractionMessageWriter()
+	service := applicationinteraction.New(repo, applicationinteraction.WithMessageWriter(writer))
+
+	if _, err := service.Like(context.Background(), 77, 1001, "like-notify-1"); err != nil {
+		t.Fatalf("like: %v", err)
+	}
+	if _, err := service.Like(context.Background(), 77, 1001, "like-notify-1"); err != nil {
+		t.Fatalf("like replay: %v", err)
+	}
+	if _, err := service.CreateComment(context.Background(), 77, 1001, "notify comment", "comment-notify-1"); err != nil {
+		t.Fatalf("comment: %v", err)
+	}
+	if _, err := service.CreateComment(context.Background(), 42, 1001, "own comment", "comment-own-1"); err != nil {
+		t.Fatalf("own comment: %v", err)
+	}
+
+	messages := writer.Messages()
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %+v", messages)
+	}
+	if messages[0].UserID != 42 || messages[0].Type != "LIKE" {
+		t.Fatalf("unexpected like message: %+v", messages[0])
+	}
+	if messages[1].UserID != 42 || messages[1].Type != "COMMENT" {
+		t.Fatalf("unexpected comment message: %+v", messages[1])
+	}
+}
+
 // TestInteractionAsyncActionPipeline 覆盖点赞收藏先写快速状态，再由事件 Worker 落库。
 func TestInteractionAsyncActionPipeline(t *testing.T) {
 	repo := newMemoryInteractionRepo()
@@ -623,6 +677,32 @@ func newMemoryActionPipeline() *memoryActionPipeline {
 		stats:  map[int64]memoryInteractionStat{},
 		events: []*applicationinteraction.ActionChangedEvent{},
 	}
+}
+
+func newMemoryInteractionMessageWriter() *memoryInteractionMessageWriter {
+	return &memoryInteractionMessageWriter{messages: []memoryInteractionMessage{}}
+}
+
+func (w *memoryInteractionMessageWriter) CreateFromEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string) (any, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.messages = append(w.messages, memoryInteractionMessage{
+		UserID:  userID,
+		Type:    messageType,
+		Title:   title,
+		EventID: eventID,
+	})
+	return nil, nil
+}
+
+func (w *memoryInteractionMessageWriter) Messages() []memoryInteractionMessage {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	items := make([]memoryInteractionMessage, len(w.messages))
+	copy(items, w.messages)
+	return items
 }
 
 func (p *memoryActionPipeline) SetActionState(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string, initialStat *domaininteraction.VideoStat) (*applicationinteraction.ActionStateResult, error) {

@@ -6,6 +6,7 @@ import (
 	infraexposure "GCFeed/internal/infra/persistence/exposure"
 	infrafeed "GCFeed/internal/infra/persistence/feed"
 	infrainteraction "GCFeed/internal/infra/persistence/interaction"
+	inframessage "GCFeed/internal/infra/persistence/message"
 	infrarelation "GCFeed/internal/infra/persistence/relation"
 	infravideo "GCFeed/internal/infra/persistence/video"
 
@@ -23,6 +24,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&infraexposure.ExposureModel{},
 		&infrainteraction.ActionModel{},
 		&infrainteraction.CommentModel{},
+		&inframessage.MessageModel{},
 		&infrarelation.FollowModel{},
 		&infrarelation.RelationStatModel{},
 	); err != nil {

@@ -5,6 +5,7 @@ import (
 	applicationexposure "GCFeed/internal/application/exposure"
 	applicationfeed "GCFeed/internal/application/feed"
 	applicationinteraction "GCFeed/internal/application/interaction"
+	applicationmessage "GCFeed/internal/application/message"
 	applicationrecommendation "GCFeed/internal/application/recommendation"
 	applicationrelation "GCFeed/internal/application/relation"
 	applicationvideo "GCFeed/internal/application/video"
@@ -17,6 +18,7 @@ import (
 	infraexposure "GCFeed/internal/infra/persistence/exposure"
 	infrafeed "GCFeed/internal/infra/persistence/feed"
 	infrainteraction "GCFeed/internal/infra/persistence/interaction"
+	inframessage "GCFeed/internal/infra/persistence/message"
 	migration "GCFeed/internal/infra/persistence/migration"
 	infrarecommendation "GCFeed/internal/infra/persistence/recommendation"
 	infrarelation "GCFeed/internal/infra/persistence/relation"
@@ -25,6 +27,7 @@ import (
 	interfaceshttpexposure "GCFeed/internal/interfaces/http/exposure"
 	interfaceshttpfeed "GCFeed/internal/interfaces/http/feed"
 	interfaceshttpinteraction "GCFeed/internal/interfaces/http/interaction"
+	interfaceshttpmessage "GCFeed/internal/interfaces/http/message"
 	interfaceshttpmiddleware "GCFeed/internal/interfaces/http/middleware"
 	interfaceshttprecommendation "GCFeed/internal/interfaces/http/recommendation"
 	interfaceshttprelation "GCFeed/internal/interfaces/http/relation"
@@ -84,6 +87,9 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	feedService := applicationfeed.New(feedRepo, feedOptions...)
 	feedHandler := interfaceshttpfeed.New(feedService)
 	interactionRepo := infrainteraction.New(gormDB)
+	messageRepo := inframessage.New(gormDB)
+	messageService := applicationmessage.New(messageRepo)
+	messageHandler := interfaceshttpmessage.New(messageService)
 	if cfg.RabbitMQ.URL != "" {
 		rabbitMQ, err = inframq.NewRabbitMQ(cfg.RabbitMQ)
 		if err != nil {
@@ -96,6 +102,9 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 			}
 		}
 	}
+	messageWriter := NewMessageWriter(messageService)
+	interactionOptions = append(interactionOptions, applicationinteraction.WithMessageWriter(messageWriter))
+	relationOptions := []applicationrelation.Option{applicationrelation.WithMessageWriter(messageWriter)}
 	videoService := applicationvideo.New(videoRepo, videoOptions...)
 	videoHandler := interfaceshttpvideo.New(videoService)
 	interactionService := applicationinteraction.New(interactionRepo, interactionOptions...)
@@ -104,7 +113,6 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	exposureService := applicationexposure.New(exposureRepo, exposureOptions...)
 	exposureHandler := interfaceshttpexposure.New(exposureService)
 	relationRepo := infrarelation.New(gormDB)
-	relationOptions := []applicationrelation.Option{}
 	if feedCache != nil {
 		relationOptions = append(relationOptions, applicationrelation.WithFollowFeedBackfiller(NewFollowFeedBackfiller(feedRepo, feedCache)))
 	}
@@ -160,13 +168,29 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	api.POST("/video-view-events", authMiddleware, exposureHandler.CreateViewEvent)
 	// 删除评论只需要评论自身 ID，所以放在顶层 comments 资源下。
 	api.DELETE("/comments/:commentId", authMiddleware, interactionHandler.DeleteComment)
+	api.GET("/messages", authMiddleware, messageHandler.List)
+	api.PATCH("/messages", authMiddleware, messageHandler.MarkRead)
+	api.GET("/message-stats/unread", authMiddleware, messageHandler.CountUnread)
 
 	internal := g.Group("/internal")
 	internal.POST("/recommendation-candidates", recommendationHandler.ListCandidates)
 	internal.POST("/exposure-decisions", recommendationHandler.DecideExposures)
 	internal.POST("/exposures", recommendationHandler.SaveExposures)
+	internal.POST("/messages", interfaceshttpmiddleware.NewInternalTokenAuth(cfg.Internal.Token), messageHandler.Create)
 
 	return nil
+}
+
+type MessageWriter struct {
+	service *applicationmessage.Service
+}
+
+func NewMessageWriter(service *applicationmessage.Service) *MessageWriter {
+	return &MessageWriter{service: service}
+}
+
+func (w *MessageWriter) CreateFromEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string) (any, error) {
+	return w.service.CreateFromEvent(ctx, userID, messageType, title, content, eventID, idempotencyKey)
 }
 
 type FollowFeedBackfiller struct {

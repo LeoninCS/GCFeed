@@ -57,6 +57,19 @@ func (r *Repository) GetVideoStat(ctx context.Context, videoID int64) (*domainin
 	}, nil
 }
 
+// GetVideoAuthorID 读取公开视频作者 ID，用于互动消息通知。
+func (r *Repository) GetVideoAuthorID(ctx context.Context, videoID int64) (int64, error) {
+	var video infravideo.VideoModel
+	err := r.db.WithContext(ctx).
+		Where("id = ? AND status = ?", videoID, domainvideo.StatusPublished).
+		Take(&video).
+		Error
+	if err != nil {
+		return 0, mapVideoError(err)
+	}
+	return video.AuthorID, nil
+}
+
 // SetAction 写入点赞或收藏状态，并在同一事务内维护视频统计计数。
 func (r *Repository) SetAction(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*domaininteraction.Action, int, int, error) {
 	actionType, err := domaininteraction.NormalizeActionType(actionType)

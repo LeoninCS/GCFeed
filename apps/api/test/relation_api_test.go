@@ -67,6 +67,19 @@ type memoryFollowFeedBackfiller struct {
 	writes        []backfillWrite
 }
 
+type memoryRelationMessageWriter struct {
+	mu       sync.Mutex
+	messages []memoryRelationMessage
+	seen     map[string]struct{}
+}
+
+type memoryRelationMessage struct {
+	UserID  int64
+	Type    string
+	Title   string
+	EventID string
+}
+
 type backfillWrite struct {
 	AuthorID int64
 	UserIDs  []int64
@@ -280,6 +293,31 @@ func TestRelationFollowSkipsBigCreatorInboxBackfill(t *testing.T) {
 	}
 }
 
+// TestRelationMessageWriter 覆盖关注成功后给被关注用户写消息。
+func TestRelationMessageWriter(t *testing.T) {
+	repo := newMemoryRelationRepo()
+	writer := newMemoryRelationMessageWriter()
+	service := applicationrelation.New(repo, applicationrelation.WithMessageWriter(writer))
+
+	if _, err := service.Follow(context.Background(), 42, 77, "follow-message-1"); err != nil {
+		t.Fatalf("follow: %v", err)
+	}
+	if _, err := service.Follow(context.Background(), 42, 77, "follow-message-1"); err != nil {
+		t.Fatalf("follow replay: %v", err)
+	}
+	if _, err := service.Unfollow(context.Background(), 42, 77, "unfollow-message-1"); err != nil {
+		t.Fatalf("unfollow: %v", err)
+	}
+
+	messages := writer.Messages()
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %+v", messages)
+	}
+	if messages[0].UserID != 77 || messages[0].Type != "FOLLOW" {
+		t.Fatalf("unexpected follow message: %+v", messages[0])
+	}
+}
+
 // TestRelationListFlow 覆盖关注列表、粉丝列表和游标分页。
 func TestRelationListFlow(t *testing.T) {
 	router, jwtManager := newRelationRouter(t)
@@ -469,6 +507,39 @@ func (b *memoryFollowFeedBackfiller) Writes() []backfillWrite {
 		writes = append(writes, write)
 	}
 	return writes
+}
+
+func newMemoryRelationMessageWriter() *memoryRelationMessageWriter {
+	return &memoryRelationMessageWriter{
+		messages: []memoryRelationMessage{},
+		seen:     map[string]struct{}{},
+	}
+}
+
+func (w *memoryRelationMessageWriter) CreateFromEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string) (any, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if _, exists := w.seen[eventID]; exists {
+		return nil, nil
+	}
+	w.seen[eventID] = struct{}{}
+	w.messages = append(w.messages, memoryRelationMessage{
+		UserID:  userID,
+		Type:    messageType,
+		Title:   title,
+		EventID: eventID,
+	})
+	return nil, nil
+}
+
+func (w *memoryRelationMessageWriter) Messages() []memoryRelationMessage {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	items := make([]memoryRelationMessage, len(w.messages))
+	copy(items, w.messages)
+	return items
 }
 
 var _ domainrelation.Repository = (*memoryRelationRepo)(nil)

@@ -2,6 +2,7 @@ package interfaceshttpmiddleware
 
 import (
 	infrajwt "GCFeed/internal/infra/jwt"
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -49,6 +50,27 @@ func NewJWTAuth(jwtManager *infrajwt.Manager) gin.HandlerFunc {
 		// 后续 Handler 从 gin.Context 中读取用户 ID 和角色，避免重复解析 JWT。
 		c.Set(ContextUserIDKey, claims.UserID)
 		c.Set(ContextRoleKey, claims.Role)
+		c.Next()
+	}
+}
+
+// NewInternalTokenAuth 校验内部服务调用使用的 X-Internal-Token。
+func NewInternalTokenAuth(token string) gin.HandlerFunc {
+	token = strings.TrimSpace(token)
+	return func(c *gin.Context) {
+		if token == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"message": "internal token is required",
+			})
+			return
+		}
+		provided := strings.TrimSpace(c.GetHeader("X-Internal-Token"))
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"message": "invalid internal token",
+			})
+			return
+		}
 		c.Next()
 	}
 }
