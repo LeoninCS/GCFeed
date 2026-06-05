@@ -10,6 +10,7 @@
 | --- | --- | --- | --- | --- |
 | GET | `/api/playback-config` | 获取端侧播放参数 | Bearer JWT | 无 |
 | GET | `/api/preload-videos` | 获取预加载视频列表 | Bearer JWT | 无 |
+| POST | `/api/playback-qos-reports` | Web 客户端上报首帧和卡顿质量数据 | Bearer JWT | 支持 |
 | POST | `/internal/playback-qos-reports` | 上报首帧和卡顿质量数据 | 服务鉴权 | 支持 |
 
 ## 3. 数据表设计
@@ -32,14 +33,15 @@
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | `id` | BIGINT | PK | 记录 ID |
-| `user_id` | BIGINT | NULLABLE | 用户 ID |
+| `user_id` | BIGINT | NOT NULL, DEFAULT 0 | 用户 ID，0 表示匿名或系统来源 |
 | `video_id` | BIGINT | NOT NULL | 视频 ID |
 | `first_frame_ms` | INT | NULLABLE | 首帧耗时 |
 | `stutter_count` | INT | NOT NULL, DEFAULT 0 | 卡顿次数 |
 | `watch_ms` | INT | NOT NULL, DEFAULT 0 | 观看时长 |
+| `idempotency_key` | VARCHAR(128) | NULLABLE | 幂等键 |
 | `created_at` | DATETIME | NOT NULL | 上报时间 |
 
-索引建议：`idx_video_time(video_id, created_at)`。
+索引建议：`idx_video_time(video_id, created_at)`，`uk_user_idempotency(user_id, idempotency_key)`。
 
 ## 4. 业务规则
 
