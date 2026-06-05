@@ -40,6 +40,7 @@ function App() {
   const [route, setRoute] = useState(() => normalizeRoute(window.location.pathname));
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
   const [user, setUser] = useState(() => readStoredUser());
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     const handlePopState = () => setRoute(normalizeRoute(window.location.pathname));
@@ -54,7 +55,33 @@ function App() {
     if ((route === "/profile" || route === "/me") && !(token && user)) {
       navigate("/timeline", setRoute);
     }
+    if (route === "/messages" && !(token && user)) {
+      navigate("/auth", setRoute);
+    }
   }, [route, token, user]);
+
+  const refreshUnreadCount = useCallback(() => {
+    if (!token || !user) {
+      setUnreadCount(0);
+      return Promise.resolve(0);
+    }
+    return apiRequest("/api/message-stats/unread", { token })
+      .then((data) => {
+        const count = Number(data.unread_count || 0);
+        setUnreadCount(Number.isFinite(count) ? count : 0);
+        return count;
+      })
+      .catch((error) => {
+        if (error.status === 401) {
+          setUnreadCount(0);
+        }
+        return 0;
+      });
+  }, [token, user]);
+
+  useEffect(() => {
+    refreshUnreadCount();
+  }, [refreshUnreadCount, route]);
 
   const session = useMemo(
     () => ({
@@ -90,6 +117,7 @@ function App() {
         user={user}
         route={route}
         authenticated={Boolean(token && user)}
+        unreadCount={unreadCount}
         onNavigate={(path) => navigate(path, setRoute)}
         onLogout={() => logout(session, setRoute)}
       >
@@ -105,6 +133,7 @@ function App() {
         user={user}
         route={route}
         authenticated={Boolean(token && user)}
+        unreadCount={unreadCount}
         onNavigate={(path) => navigate(path, setRoute)}
         onLogout={() => logout(session, setRoute)}
       >
@@ -119,10 +148,26 @@ function App() {
         user={user}
         route={route}
         authenticated={Boolean(token && user)}
+        unreadCount={unreadCount}
         onNavigate={(path) => navigate(path, setRoute)}
         onLogout={() => logout(session, setRoute)}
       >
         <UploadPage session={session} onNavigate={(path) => navigate(path, setRoute)} />
+      </AppShell>
+    );
+  }
+
+  if (route === "/messages") {
+    return (
+      <AppShell
+        user={user}
+        route={route}
+        authenticated={Boolean(token && user)}
+        unreadCount={unreadCount}
+        onNavigate={(path) => navigate(path, setRoute)}
+        onLogout={() => logout(session, setRoute)}
+      >
+        <MessagesPage session={session} onNavigate={(path) => navigate(path, setRoute)} onUnreadChange={refreshUnreadCount} />
       </AppShell>
     );
   }
@@ -132,6 +177,7 @@ function App() {
       user={user}
       route={route}
       authenticated={Boolean(token && user)}
+      unreadCount={unreadCount}
       onNavigate={(path) => navigate(path, setRoute)}
       onLogout={() => logout(session, setRoute)}
     >
@@ -254,11 +300,17 @@ function LoginPage({ session, onNavigate }) {
   );
 }
 
-function AppShell({ children, user, route, authenticated, onNavigate, onLogout }) {
+function AppShell({ children, user, route, authenticated, unreadCount, onNavigate, onLogout }) {
   const displayUser = user || emptyProfile;
   return (
     <div className="app-shell">
-      <TopNav user={displayUser} authenticated={authenticated} onNavigate={onNavigate} onLogout={onLogout} />
+      <TopNav
+        user={displayUser}
+        authenticated={authenticated}
+        unreadCount={unreadCount}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
       <div className="app-body">
         <aside className="sidebar">
           {FEED_SCENES.map((scene) => (
@@ -271,6 +323,11 @@ function AppShell({ children, user, route, authenticated, onNavigate, onLogout }
               <span>{scene.label}</span>
             </button>
           ))}
+          <button className={`sidebar-link ${route === "/messages" ? "active" : ""}`} onClick={() => onNavigate(authenticated ? "/messages" : "/auth")}>
+            <span className="material-symbols-outlined filled">notifications</span>
+            <span>消息</span>
+            {authenticated && unreadCount > 0 && <span className="nav-badge">{formatBadgeCount(unreadCount)}</span>}
+          </button>
         </aside>
         {children}
       </div>
@@ -278,7 +335,7 @@ function AppShell({ children, user, route, authenticated, onNavigate, onLogout }
   );
 }
 
-function TopNav({ user, authenticated, onNavigate, onLogout }) {
+function TopNav({ user, authenticated, unreadCount, onNavigate, onLogout }) {
   return (
     <header className="top-nav">
       <div className="top-left">
@@ -297,8 +354,9 @@ function TopNav({ user, authenticated, onNavigate, onLogout }) {
           <span className="material-symbols-outlined">upload</span>
           发布
         </button>
-        <button className="icon-button" aria-label="通知">
+        <button className="icon-button badge-button" aria-label="通知" onClick={() => onNavigate(authenticated ? "/messages" : "/auth")}>
           <span className="material-symbols-outlined">notifications</span>
+          {authenticated && unreadCount > 0 && <span className="nav-badge floating">{formatBadgeCount(unreadCount)}</span>}
         </button>
         <button
           className={`avatar-button ${authenticated ? "" : "guest"}`}
@@ -1097,6 +1155,164 @@ function CommentMessage({ icon, title, action, onAction }) {
   );
 }
 
+function MessagesPage({ session, onNavigate, onUnreadChange }) {
+  const [items, setItems] = useState([]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [hasMore, setHasMore] = useState(false);
+  const [state, setState] = useState("loading");
+  const [error, setError] = useState("");
+  const [busyID, setBusyID] = useState(0);
+  const [markingAll, setMarkingAll] = useState(false);
+
+  const loadMessages = useCallback(
+    (cursor = "", append = false) => {
+      if (!session.token) {
+        onNavigate("/auth");
+        return Promise.resolve();
+      }
+      setState(append ? "loadingMore" : "loading");
+      setError("");
+      return fetchMessages(session.token, cursor)
+        .then((data) => {
+          const nextItems = data.items || [];
+          setItems((current) => (append ? appendMessages(current, nextItems) : nextItems));
+          setNextCursor(data.next_cursor || "");
+          setHasMore(Boolean(data.has_more && data.next_cursor));
+          setState("ready");
+        })
+        .catch((loadError) => {
+          if (loadError.status === 401) {
+            session.clearAuth();
+            onNavigate("/auth");
+            return;
+          }
+          setError(loadError.message || "消息加载失败");
+          setState("error");
+        });
+    },
+    [onNavigate, session]
+  );
+
+  useEffect(() => {
+    loadMessages("", false);
+  }, [loadMessages]);
+
+  async function markMessageRead(message) {
+    if (!message || message.is_read || busyID || markingAll) return;
+    setBusyID(message.id);
+    try {
+      await markMessagesRead(session.token, [message.id]);
+      setItems((current) =>
+        current.map((item) => (item.id === message.id ? { ...item, is_read: true, read_at: new Date().toISOString() } : item))
+      );
+      await onUnreadChange();
+    } catch (markError) {
+      if (markError.status === 401) {
+        session.clearAuth();
+        onNavigate("/auth");
+        return;
+      }
+      setError(markError.message || "已读操作失败");
+    } finally {
+      setBusyID(0);
+    }
+  }
+
+  async function markAllRead() {
+    if (markingAll || items.every((item) => item.is_read)) return;
+    setMarkingAll(true);
+    setError("");
+    try {
+      await markMessagesRead(session.token, []);
+      setItems((current) => current.map((item) => ({ ...item, is_read: true, read_at: item.read_at || new Date().toISOString() })));
+      await onUnreadChange();
+    } catch (markError) {
+      if (markError.status === 401) {
+        session.clearAuth();
+        onNavigate("/auth");
+        return;
+      }
+      setError(markError.message || "全部已读失败");
+    } finally {
+      setMarkingAll(false);
+    }
+  }
+
+  const unreadCount = items.filter((item) => !item.is_read).length;
+  const loadingInitial = state === "loading" && items.length === 0;
+  const loadingMore = state === "loadingMore";
+
+  return (
+    <main className="messages-page">
+      <section className="messages-header">
+        <div>
+          <p className="eyebrow">Messages</p>
+          <h1>消息中心</h1>
+        </div>
+        <div className="messages-actions">
+          <span className="messages-count">{unreadCount > 0 ? `${unreadCount} 未读` : "已读完"}</span>
+          <button className="ghost-button compact" onClick={() => loadMessages("", false)} disabled={loadingInitial || loadingMore}>
+            <span className="material-symbols-outlined">refresh</span>
+            刷新
+          </button>
+          <button className="primary-button compact" onClick={markAllRead} disabled={markingAll || unreadCount === 0}>
+            <span className="material-symbols-outlined">done_all</span>
+            {markingAll ? "处理中" : "全部已读"}
+          </button>
+        </div>
+      </section>
+
+      <section className="messages-list-wrap">
+        {loadingInitial && <PageMessage icon="hourglass_top" title="正在加载消息" />}
+        {state === "error" && items.length === 0 && (
+          <PageMessage icon="sync_problem" title={error || "消息加载失败"} action="重试" onAction={() => loadMessages("", false)} />
+        )}
+        {state === "ready" && items.length === 0 && <PageMessage icon="notifications" title="暂无消息" />}
+        {error && items.length > 0 && <p className="form-message">{error}</p>}
+        <div className="messages-list">
+          {items.map((message) => (
+            <button
+              className={`message-item ${message.is_read ? "read" : "unread"}`}
+              key={message.id}
+              type="button"
+              onClick={() => markMessageRead(message)}
+              disabled={busyID === message.id}
+            >
+              <span className={`message-icon ${message.is_read ? "" : "active"}`}>
+                <span className="material-symbols-outlined">{messageIcon(message.type)}</span>
+              </span>
+              <span className="message-copy">
+                <span className="message-title-row">
+                  <strong>{message.title}</strong>
+                  <small>{formatRelativeTime(message.created_at)}</small>
+                </span>
+                <span>{message.content}</span>
+              </span>
+              <span className="message-state">{message.is_read ? "已读" : busyID === message.id ? "处理中" : "未读"}</span>
+            </button>
+          ))}
+        </div>
+        {hasMore && (
+          <button className="ghost-button messages-more" onClick={() => loadMessages(nextCursor, true)} disabled={loadingMore}>
+            <span className="material-symbols-outlined">expand_more</span>
+            {loadingMore ? "加载中" : "加载更多"}
+          </button>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function PageMessage({ icon, title, action, onAction }) {
+  return (
+    <div className="page-message">
+      <span className="material-symbols-outlined">{icon}</span>
+      <strong>{title}</strong>
+      {action && <button onClick={onAction}>{action}</button>}
+    </div>
+  );
+}
+
 function ProfilePage({ session, onNavigate }) {
   const baseUser = session.user || emptyProfile;
   const [form, setForm] = useState({
@@ -1859,7 +2075,9 @@ function normalizeRoute(pathname) {
   if (pathname === "/login") return "/auth";
   if (pathname === "/me") return "/profile";
   if (/^\/users\/\d+$/.test(pathname)) return pathname;
-  if (["/", "/auth", "/recommend", "/timeline", "/following", "/hotfeed", "/profile", "/upload"].includes(pathname)) return pathname;
+  if (["/", "/auth", "/recommend", "/timeline", "/following", "/hotfeed", "/profile", "/upload", "/messages"].includes(pathname)) {
+    return pathname;
+  }
   return "/timeline";
 }
 
@@ -1918,6 +2136,24 @@ async function fetchFeedPage(scene, token, cursor = "", requestID = "") {
   return apiRequest(`/api/feed-items?${params.toString()}`, { token });
 }
 
+async function fetchMessages(token, cursor = "") {
+  const params = new URLSearchParams({ limit: "20" });
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  return apiRequest(`/api/messages?${params.toString()}`, { token });
+}
+
+async function markMessagesRead(token, messageIDs = []) {
+  return apiRequest("/api/messages", {
+    method: "PATCH",
+    token,
+    body: {
+      message_ids: messageIDs
+    }
+  });
+}
+
 function appendFeedItems(currentItems, nextItems) {
   if (!nextItems.length) return currentItems;
   const seen = new Set(currentItems.map((item) => item.video_id));
@@ -1925,6 +2161,18 @@ function appendFeedItems(currentItems, nextItems) {
   for (const item of nextItems) {
     if (seen.has(item.video_id)) continue;
     seen.add(item.video_id);
+    merged.push(item);
+  }
+  return merged;
+}
+
+function appendMessages(currentItems, nextItems) {
+  if (!nextItems.length) return currentItems;
+  const seen = new Set(currentItems.map((item) => item.id));
+  const merged = [...currentItems];
+  for (const item of nextItems) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
     merged.push(item);
   }
   return merged;
@@ -1991,6 +2239,27 @@ function profileFromComment(comment) {
     avatar_url: comment.user_avatar_url || image.currentUser,
     bio: ""
   };
+}
+
+function messageIcon(type) {
+  switch (String(type || "").toUpperCase()) {
+    case "LIKE":
+      return "favorite";
+    case "COMMENT":
+      return "chat_bubble";
+    case "FOLLOW":
+      return "person_add";
+    case "SYSTEM":
+      return "campaign";
+    default:
+      return "notifications";
+  }
+}
+
+function formatBadgeCount(count) {
+  const value = Number(count || 0);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return value > 99 ? "99+" : String(value);
 }
 
 function readPublicProfiles() {

@@ -436,6 +436,35 @@ textarea:focus {
   background: var(--surface-mid);
 }
 
+.badge-button {
+  position: relative;
+}
+
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  color: #001b3e;
+  border-radius: 999px;
+  background: var(--cyan);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.nav-badge.floating {
+  position: absolute;
+  top: -3px;
+  right: -5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
 .icon-button.small {
   width: 32px;
   height: 32px;
@@ -494,6 +523,7 @@ textarea:focus {
 }
 
 .sidebar-link {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -515,6 +545,10 @@ textarea:focus {
 
 .sidebar-link .material-symbols-outlined {
   font-size: 28px;
+}
+
+.sidebar-link .nav-badge {
+  margin-left: auto;
 }
 
 .feed-layout {
@@ -1141,6 +1175,15 @@ textarea:focus {
   background: var(--surface);
 }
 
+.messages-page {
+  width: calc(100% - var(--sidebar));
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: 24px;
+  background: var(--surface);
+}
+
 .upload-page {
   width: calc(100% - var(--sidebar));
   min-width: 0;
@@ -1148,6 +1191,202 @@ textarea:focus {
   overflow-y: auto;
   padding: 24px;
   background: var(--surface);
+}
+
+.messages-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 22px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface-low);
+}
+
+.messages-header h1 {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1.15;
+}
+
+.messages-header p:last-child {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+
+.messages-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.messages-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  color: var(--cyan);
+  border: 1px solid rgba(0, 220, 229, 0.3);
+  border-radius: 999px;
+  background: rgba(0, 220, 229, 0.08);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.messages-list-wrap {
+  display: grid;
+  gap: 14px;
+  min-height: 360px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: rgba(31, 31, 33, 0.78);
+}
+
+.messages-list {
+  display: grid;
+  gap: 10px;
+}
+
+.message-item {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  padding: 14px;
+  color: var(--text);
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.message-item:hover {
+  border-color: rgba(170, 199, 255, 0.34);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.message-item:active {
+  transform: scale(0.99);
+}
+
+.message-item:disabled {
+  cursor: progress;
+  opacity: 0.78;
+}
+
+.message-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.message-icon.active {
+  color: #001b3e;
+  border-color: transparent;
+  background: var(--primary);
+}
+
+.message-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.message-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.message-title-row strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-title-row small {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.message-copy > span:last-child {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-state {
+  min-width: 56px;
+  justify-self: end;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-align: right;
+}
+
+.message-item.unread .message-state {
+  color: var(--cyan);
+}
+
+.messages-more {
+  justify-self: center;
+}
+
+.page-message {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 12px;
+  min-height: 260px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.page-message .material-symbols-outlined {
+  width: 58px;
+  height: 58px;
+  color: var(--cyan);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 29px;
+}
+
+.page-message strong {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.page-message button {
+  height: 36px;
+  padding: 0 14px;
+  color: #001b3e;
+  border-radius: 999px;
+  background: var(--primary);
+  font-weight: 800;
 }
 
 .upload-card {
@@ -1870,7 +2109,7 @@ textarea:focus {
     bottom: 0;
     left: 0;
     top: auto;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     width: 100%;
     height: 64px;
     flex-basis: auto;
@@ -1892,8 +2131,18 @@ textarea:focus {
 
   .feed-layout,
   .profile-page,
+  .messages-page,
   .upload-page {
     width: 100%;
+  }
+
+  .messages-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .messages-actions {
+    justify-content: flex-start;
   }
 
   .upload-grid {
@@ -2015,6 +2264,34 @@ textarea:focus {
 
   .profile-page {
     padding: 14px;
+  }
+
+  .messages-page {
+    padding: 14px;
+  }
+
+  .messages-header,
+  .messages-list-wrap {
+    padding: 16px;
+  }
+
+  .messages-header h1 {
+    font-size: 26px;
+  }
+
+  .message-item {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .message-state {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .message-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
   }
 
   .upload-page {
