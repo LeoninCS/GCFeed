@@ -399,8 +399,7 @@ func validateVideoMetadata(metadata *probeResult) error {
 }
 
 func faststartVideo(ctx context.Context, path string) error {
-	targetDir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(targetDir, "*.faststart")
+	tmp, err := createFaststartTempFile(path)
 	if err != nil {
 		return errFaststartFailed
 	}
@@ -423,6 +422,8 @@ func faststartVideo(ctx context.Context, path string) error {
 		"copy",
 		"-movflags",
 		"+faststart",
+		"-f",
+		"mp4",
 		tmpPath,
 	)
 	var stderr bytes.Buffer
@@ -437,6 +438,11 @@ func faststartVideo(ctx context.Context, path string) error {
 		return errFaststartFailed
 	}
 	return nil
+}
+
+func createFaststartTempFile(path string) (*os.File, error) {
+	targetDir := filepath.Dir(path)
+	return os.CreateTemp(targetDir, "*.faststart.mp4")
 }
 
 func writeUploadValidationError(c *gin.Context, err error) {
