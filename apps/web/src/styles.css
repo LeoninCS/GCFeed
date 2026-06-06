@@ -948,6 +948,8 @@ textarea:focus {
 
 .comment-list {
   display: grid;
+  align-content: start;
+  align-items: start;
   gap: 8px;
   min-height: 0;
   flex: 1;
@@ -1011,6 +1013,7 @@ textarea:focus {
 
 .comment-item {
   display: grid;
+  align-items: start;
   grid-template-columns: 40px minmax(0, 1fr);
   gap: 10px;
 }

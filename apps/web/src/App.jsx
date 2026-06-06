@@ -1196,7 +1196,6 @@ function VideoStage({
           muted
           loop
           playsInline
-          controls
           preload={active ? "metadata" : "none"}
           onLoadedData={handleLoadedData}
           onPlaying={handlePlaying}
