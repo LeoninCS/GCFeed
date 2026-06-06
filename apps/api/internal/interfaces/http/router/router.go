@@ -86,6 +86,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 		feedCache = infracache.NewFeedCache(redisClient)
 		feedOptions = append(feedOptions, applicationfeed.WithFeedCache(feedCache))
 		interactionOptions = append(interactionOptions, applicationinteraction.WithHotScoreRecorder(feedCache))
+		interactionOptions = append(interactionOptions, applicationinteraction.WithStatCache(feedCache))
 	}
 	feedService := applicationfeed.New(feedRepo, feedOptions...)
 	feedHandler := interfaceshttpfeed.New(feedService)
@@ -201,6 +202,10 @@ func NewMessageWriter(service *applicationmessage.Service) *MessageWriter {
 
 func (w *MessageWriter) CreateFromEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string) (any, error) {
 	return w.service.CreateFromEvent(ctx, userID, messageType, title, content, eventID, idempotencyKey)
+}
+
+func (w *MessageWriter) CreateFromActorEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string, actorID int64, actorNickname string, actorAvatarURL string) (any, error) {
+	return w.service.CreateFromActorEvent(ctx, userID, messageType, title, content, eventID, idempotencyKey, actorID, actorNickname, actorAvatarURL)
 }
 
 type FollowFeedBackfiller struct {

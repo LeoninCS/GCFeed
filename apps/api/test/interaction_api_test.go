@@ -93,11 +93,41 @@ type memoryInteractionMessageWriter struct {
 	messages []memoryInteractionMessage
 }
 
+type memoryInteractionStatCache struct {
+	mu    sync.Mutex
+	stats map[int64]*domaininteraction.VideoStat
+}
+
 type memoryInteractionMessage struct {
-	UserID  int64
-	Type    string
-	Title   string
-	EventID string
+	UserID         int64
+	Type           string
+	Title          string
+	EventID        string
+	ActorID        int64
+	ActorNickname  string
+	ActorAvatarURL string
+}
+
+func newMemoryInteractionStatCache() *memoryInteractionStatCache {
+	return &memoryInteractionStatCache{stats: map[int64]*domaininteraction.VideoStat{}}
+}
+
+func (c *memoryInteractionStatCache) SetVideoStat(ctx context.Context, stat *domaininteraction.VideoStat) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cloned := *stat
+	c.stats[stat.VideoID] = &cloned
+	return nil
+}
+
+func (c *memoryInteractionStatCache) StatForTest(videoID int64) *domaininteraction.VideoStat {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.stats[videoID] == nil {
+		return nil
+	}
+	cloned := *c.stats[videoID]
+	return &cloned
 }
 
 func newMemoryInteractionRepo() *memoryInteractionRepo {
@@ -141,6 +171,18 @@ func (r *memoryInteractionRepo) GetVideoAuthorID(ctx context.Context, videoID in
 		return 0, domaininteraction.ErrVideoNotFound
 	}
 	return r.videos[videoID].AuthorID, nil
+}
+
+// GetUserProfile 模拟读取用户展示资料。
+func (r *memoryInteractionRepo) GetUserProfile(ctx context.Context, userID int64) (*domaininteraction.UserProfile, error) {
+	if userID <= 0 {
+		return nil, domaininteraction.ErrInvalidUserID
+	}
+	return &domaininteraction.UserProfile{
+		ID:        userID,
+		Nickname:  memoryInteractionNickname(userID),
+		AvatarURL: memoryInteractionAvatar(userID),
+	}, nil
 }
 
 // SetAction 模拟点赞/收藏状态变更，并维护对应计数。
@@ -449,6 +491,29 @@ func TestInteractionHotScoreRecorder(t *testing.T) {
 	}
 }
 
+func TestInteractionCommentSyncsStatCache(t *testing.T) {
+	repo := newMemoryInteractionRepo()
+	cache := newMemoryInteractionStatCache()
+	service := applicationinteraction.New(repo, applicationinteraction.WithStatCache(cache))
+
+	created, err := service.CreateComment(context.Background(), 77, 1001, "cache comment", "comment-cache-1")
+	if err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	stat := cache.StatForTest(1001)
+	if stat == nil || stat.CommentCount != 1 {
+		t.Fatalf("expected comment count cache to be 1, got %+v", stat)
+	}
+
+	if _, err := service.DeleteComment(context.Background(), created.Comment.ID, 77, domainaccount.RoleUser); err != nil {
+		t.Fatalf("delete comment: %v", err)
+	}
+	stat = cache.StatForTest(1001)
+	if stat == nil || stat.CommentCount != 0 {
+		t.Fatalf("expected comment count cache to be 0, got %+v", stat)
+	}
+}
+
 // TestInteractionMessageWriter 覆盖点赞和评论成功后给视频作者写消息。
 func TestInteractionMessageWriter(t *testing.T) {
 	repo := newMemoryInteractionRepo()
@@ -475,8 +540,14 @@ func TestInteractionMessageWriter(t *testing.T) {
 	if messages[0].UserID != 42 || messages[0].Type != "LIKE" {
 		t.Fatalf("unexpected like message: %+v", messages[0])
 	}
+	if messages[0].ActorID != 77 || messages[0].ActorNickname != memoryInteractionNickname(77) || messages[0].ActorAvatarURL != memoryInteractionAvatar(77) {
+		t.Fatalf("unexpected like actor: %+v", messages[0])
+	}
 	if messages[1].UserID != 42 || messages[1].Type != "COMMENT" {
 		t.Fatalf("unexpected comment message: %+v", messages[1])
+	}
+	if messages[1].ActorID != 77 || messages[1].ActorNickname != memoryInteractionNickname(77) || messages[1].ActorAvatarURL != memoryInteractionAvatar(77) {
+		t.Fatalf("unexpected comment actor: %+v", messages[1])
 	}
 }
 
@@ -692,6 +763,22 @@ func (w *memoryInteractionMessageWriter) CreateFromEvent(ctx context.Context, us
 		Type:    messageType,
 		Title:   title,
 		EventID: eventID,
+	})
+	return nil, nil
+}
+
+func (w *memoryInteractionMessageWriter) CreateFromActorEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string, actorID int64, actorNickname string, actorAvatarURL string) (any, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.messages = append(w.messages, memoryInteractionMessage{
+		UserID:         userID,
+		Type:           messageType,
+		Title:          title,
+		EventID:        eventID,
+		ActorID:        actorID,
+		ActorNickname:  actorNickname,
+		ActorAvatarURL: actorAvatarURL,
 	})
 	return nil, nil
 }

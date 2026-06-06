@@ -28,6 +28,9 @@ func (r *Repository) Create(ctx context.Context, message *domainmessage.Message,
 		Type:           message.Type,
 		Title:          message.Title,
 		Content:        message.Content,
+		ActorID:        message.ActorID,
+		ActorNickname:  message.ActorNickname,
+		ActorAvatarURL: message.ActorAvatarURL,
 		EventID:        optionalString(message.EventID),
 		IdempotencyKey: optionalString(idempotencyKey),
 		IsRead:         false,
@@ -140,13 +143,16 @@ func (r *Repository) findExisting(ctx context.Context, userID int64, eventID str
 }
 
 func restore(model MessageModel) *domainmessage.Message {
-	return domainmessage.Restore(
+	return domainmessage.RestoreWithActor(
 		model.ID,
 		model.UserID,
 		model.Type,
 		model.Title,
 		model.Content,
 		stringValue(model.EventID),
+		model.ActorID,
+		model.ActorNickname,
+		model.ActorAvatarURL,
 		model.IsRead,
 		model.CreatedAt,
 		model.ReadAt,

@@ -3,11 +3,14 @@ package interfaceshttpmessage
 import "time"
 
 type createMessageRequest struct {
-	UserID  int64  `json:"user_id"`
-	Type    string `json:"type"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	EventID string `json:"event_id"`
+	UserID         int64  `json:"user_id"`
+	Type           string `json:"type"`
+	Title          string `json:"title"`
+	Content        string `json:"content"`
+	EventID        string `json:"event_id"`
+	ActorID        int64  `json:"actor_id"`
+	ActorNickname  string `json:"actor_nickname"`
+	ActorAvatarURL string `json:"actor_avatar_url"`
 }
 
 type markReadRequest struct {
@@ -15,15 +18,18 @@ type markReadRequest struct {
 }
 
 type messageResponse struct {
-	ID        int64      `json:"id"`
-	UserID    int64      `json:"user_id"`
-	Type      string     `json:"type"`
-	Title     string     `json:"title"`
-	Content   string     `json:"content"`
-	EventID   string     `json:"event_id,omitempty"`
-	IsRead    bool       `json:"is_read"`
-	CreatedAt time.Time  `json:"created_at"`
-	ReadAt    *time.Time `json:"read_at,omitempty"`
+	ID             int64      `json:"id"`
+	UserID         int64      `json:"user_id"`
+	Type           string     `json:"type"`
+	Title          string     `json:"title"`
+	Content        string     `json:"content"`
+	EventID        string     `json:"event_id,omitempty"`
+	ActorID        int64      `json:"actor_id,omitempty"`
+	ActorNickname  string     `json:"actor_nickname,omitempty"`
+	ActorAvatarURL string     `json:"actor_avatar_url,omitempty"`
+	IsRead         bool       `json:"is_read"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ReadAt         *time.Time `json:"read_at,omitempty"`
 }
 
 type messageListResponse struct {

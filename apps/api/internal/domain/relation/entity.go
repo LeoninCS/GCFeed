@@ -42,6 +42,14 @@ type UserItem struct {
 	FollowedAt time.Time
 }
 
+// UserProfile 是关系通知里展示触发用户所需的资料。
+type UserProfile struct {
+	UserID    int64
+	Nickname  string
+	AvatarURL string
+	Bio       string
+}
+
 // ListCursor 保存关系列表分页需要的排序字段。
 type ListCursor struct {
 	FollowedAt time.Time
@@ -110,6 +118,16 @@ func RestoreUserItem(userID int64, nickname string, avatarURL string, bio string
 		AvatarURL:  strings.TrimSpace(avatarURL),
 		Bio:        strings.TrimSpace(bio),
 		FollowedAt: followedAt,
+	}
+}
+
+// RestoreUserProfile 从账号记录恢复通知展示资料。
+func RestoreUserProfile(userID int64, nickname string, avatarURL string, bio string) *UserProfile {
+	return &UserProfile{
+		UserID:    userID,
+		Nickname:  strings.TrimSpace(nickname),
+		AvatarURL: strings.TrimSpace(avatarURL),
+		Bio:       strings.TrimSpace(bio),
 	}
 }
 

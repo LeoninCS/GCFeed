@@ -74,10 +74,13 @@ type memoryRelationMessageWriter struct {
 }
 
 type memoryRelationMessage struct {
-	UserID  int64
-	Type    string
-	Title   string
-	EventID string
+	UserID         int64
+	Type           string
+	Title          string
+	EventID        string
+	ActorID        int64
+	ActorNickname  string
+	ActorAvatarURL string
 }
 
 type backfillWrite struct {
@@ -200,6 +203,18 @@ func (r *memoryRelationRepo) ListFollowers(ctx context.Context, userID int64, cu
 	return limitRelationItems(items, limit), nil
 }
 
+// GetUserProfile 模拟读取关注通知触发用户资料。
+func (r *memoryRelationRepo) GetUserProfile(ctx context.Context, userID int64) (*domainrelation.UserProfile, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	user, exists := r.users[userID]
+	if !exists || !user.Active {
+		return nil, domainrelation.ErrTargetUserNotFound
+	}
+	return domainrelation.RestoreUserProfile(user.ID, user.Nickname, user.AvatarURL, user.Bio), nil
+}
+
 // TestRelationFollowFlow 覆盖关注、幂等重放、取关和重复取关。
 func TestRelationFollowFlow(t *testing.T) {
 	router, jwtManager := newRelationRouter(t)
@@ -315,6 +330,9 @@ func TestRelationMessageWriter(t *testing.T) {
 	}
 	if messages[0].UserID != 77 || messages[0].Type != "FOLLOW" {
 		t.Fatalf("unexpected follow message: %+v", messages[0])
+	}
+	if messages[0].ActorID != 42 || messages[0].ActorNickname != "viewer" || messages[0].ActorAvatarURL != "https://example.com/42.jpg" {
+		t.Fatalf("unexpected follow actor: %+v", messages[0])
 	}
 }
 
@@ -529,6 +547,26 @@ func (w *memoryRelationMessageWriter) CreateFromEvent(ctx context.Context, userI
 		Type:    messageType,
 		Title:   title,
 		EventID: eventID,
+	})
+	return nil, nil
+}
+
+func (w *memoryRelationMessageWriter) CreateFromActorEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string, actorID int64, actorNickname string, actorAvatarURL string) (any, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if _, exists := w.seen[eventID]; exists {
+		return nil, nil
+	}
+	w.seen[eventID] = struct{}{}
+	w.messages = append(w.messages, memoryRelationMessage{
+		UserID:         userID,
+		Type:           messageType,
+		Title:          title,
+		EventID:        eventID,
+		ActorID:        actorID,
+		ActorNickname:  actorNickname,
+		ActorAvatarURL: actorAvatarURL,
 	})
 	return nil, nil
 }

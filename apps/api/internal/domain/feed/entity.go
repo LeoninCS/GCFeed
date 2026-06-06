@@ -35,6 +35,8 @@ type FeedItem struct {
 	LikeCount       int
 	CommentCount    int
 	FavoriteCount   int
+	Liked           bool
+	Favorited       bool
 	HotScore        int
 	PublishedAt     time.Time
 }
@@ -66,6 +68,13 @@ type FeedStat struct {
 	LikeCount     int
 	CommentCount  int
 	FavoriteCount int
+}
+
+// ViewerActionState 保存当前用户对一批视频的互动状态。
+type ViewerActionState struct {
+	VideoID   int64
+	Liked     bool
+	Favorited bool
 }
 
 // TimelineCursor 保存时间线分页所需的排序字段。

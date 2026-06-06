@@ -16,4 +16,6 @@ type Repository interface {
 	BatchGetFeedCards(ctx context.Context, videoIDs []int64) (map[int64]*FeedCard, error)
 	// BatchGetFeedStats 批量读取视频互动计数。
 	BatchGetFeedStats(ctx context.Context, videoIDs []int64) (map[int64]*FeedStat, error)
+	// BatchGetViewerActionStates 批量读取当前用户对视频的点赞和收藏状态。
+	BatchGetViewerActionStates(ctx context.Context, viewerID int64, videoIDs []int64) (map[int64]*ViewerActionState, error)
 }

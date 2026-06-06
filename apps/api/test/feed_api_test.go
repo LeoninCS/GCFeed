@@ -36,6 +36,8 @@ type feedItemAPIResponse struct {
 	LikeCount       int       `json:"like_count"`
 	CommentCount    int       `json:"comment_count"`
 	FavoriteCount   int       `json:"favorite_count"`
+	Liked           bool      `json:"liked"`
+	Favorited       bool      `json:"favorited"`
 	PublishedAt     time.Time `json:"published_at"`
 }
 
@@ -50,6 +52,7 @@ type memoryFeedRepo struct {
 	following                map[int64]map[int64]struct{}
 	followerCounts           map[int64]int
 	inbox                    map[int64]map[int64]struct{}
+	viewerActions            map[int64]map[int64]*domainfeed.ViewerActionState
 	followingCalls           int
 	followingPullAuthorCalls int
 }
@@ -70,6 +73,7 @@ func newMemoryFeedRepo(items []*domainfeed.FeedItem) *memoryFeedRepo {
 		following:      map[int64]map[int64]struct{}{},
 		followerCounts: map[int64]int{},
 		inbox:          map[int64]map[int64]struct{}{},
+		viewerActions:  map[int64]map[int64]*domainfeed.ViewerActionState{},
 	}
 }
 
@@ -141,6 +145,19 @@ func (r *memoryFeedRepo) PushToInboxForTest(viewerID int64, videoID int64) {
 		r.inbox[viewerID] = map[int64]struct{}{}
 	}
 	r.inbox[viewerID][videoID] = struct{}{}
+}
+
+func (r *memoryFeedRepo) SetViewerActionForTest(viewerID int64, videoID int64, liked bool, favorited bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.viewerActions[viewerID] == nil {
+		r.viewerActions[viewerID] = map[int64]*domainfeed.ViewerActionState{}
+	}
+	r.viewerActions[viewerID][videoID] = &domainfeed.ViewerActionState{
+		VideoID:   videoID,
+		Liked:     liked,
+		Favorited: favorited,
+	}
 }
 
 // ListTimelinePage 模拟真实仓储的 published_at DESC, video_id DESC 排序。
@@ -420,6 +437,21 @@ func (r *memoryFeedRepo) BatchGetFeedStats(ctx context.Context, videoIDs []int64
 	return stats, nil
 }
 
+func (r *memoryFeedRepo) BatchGetViewerActionStates(ctx context.Context, viewerID int64, videoIDs []int64) (map[int64]*domainfeed.ViewerActionState, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	states := map[int64]*domainfeed.ViewerActionState{}
+	for _, videoID := range videoIDs {
+		state := &domainfeed.ViewerActionState{VideoID: videoID}
+		if stored := r.viewerActions[viewerID][videoID]; stored != nil {
+			*state = *stored
+		}
+		states[videoID] = state
+	}
+	return states, nil
+}
+
 // TestFeedAPIFlow 覆盖 Feed 首页、下一页游标和刷新读取。
 func TestFeedAPIFlow(t *testing.T) {
 	router := newFeedRouter(seedFeedItems())
@@ -491,6 +523,29 @@ func TestFeedSceneQuery(t *testing.T) {
 
 	followingResponse := performJSONRequest(router, http.MethodGet, "/api/feed-items?scene=following&limit=1", "", "")
 	requireStatus(t, followingResponse, http.StatusUnauthorized)
+}
+
+func TestFeedIncludesViewerActionState(t *testing.T) {
+	repo := newMemoryFeedRepo(seedFeedItems())
+	repo.SetViewerActionForTest(42, 3, true, false)
+	repo.SetViewerActionForTest(42, 2, false, true)
+	router, jwtManager := newFeedRouterWithServiceAndJWT(t, applicationfeed.New(repo))
+	token := signTestToken(t, jwtManager, 42)
+
+	response := performJSONRequest(router, http.MethodGet, "/api/feed-items?limit=2", "", token)
+	requireStatus(t, response, http.StatusOK)
+
+	var page feedAPIResponse
+	decodeJSON(t, response, &page)
+	if len(page.Items) != 2 {
+		t.Fatalf("unexpected feed response: %+v", page)
+	}
+	if !page.Items[0].Liked || page.Items[0].Favorited {
+		t.Fatalf("expected first item liked only: %+v", page.Items[0])
+	}
+	if page.Items[1].Liked || !page.Items[1].Favorited {
+		t.Fatalf("expected second item favorited only: %+v", page.Items[1])
+	}
 }
 
 // TestFollowingFeedScene 覆盖关注流 MySQL 兜底读取。

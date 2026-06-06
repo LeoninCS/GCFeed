@@ -10,4 +10,6 @@ type Repository interface {
 	ListFollowing(ctx context.Context, userID int64, cursor *ListCursor, limit int) ([]*UserItem, error)
 	// ListFollowers 查询关注当前用户的人。
 	ListFollowers(ctx context.Context, userID int64, cursor *ListCursor, limit int) ([]*UserItem, error)
+	// GetUserProfile 读取用户展示资料，用于关注通知。
+	GetUserProfile(ctx context.Context, userID int64) (*UserProfile, error)
 }

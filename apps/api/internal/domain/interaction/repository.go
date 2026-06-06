@@ -8,6 +8,8 @@ type Repository interface {
 	GetVideoStat(ctx context.Context, videoID int64) (*VideoStat, error)
 	// GetVideoAuthorID 读取公开视频作者，用于互动通知。
 	GetVideoAuthorID(ctx context.Context, videoID int64) (int64, error)
+	// GetUserProfile 读取触发互动的用户展示资料。
+	GetUserProfile(ctx context.Context, userID int64) (*UserProfile, error)
 	// SetAction 设置点赞或收藏状态，并返回最新统计值。
 	SetAction(ctx context.Context, userID int64, videoID int64, actionType string, active bool, idempotencyKey string) (*Action, int, int, error)
 	// CreateComment 创建评论并返回视频最新评论数。

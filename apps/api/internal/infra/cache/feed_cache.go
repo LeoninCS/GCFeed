@@ -202,6 +202,26 @@ func (c *FeedCache) SetStats(ctx context.Context, stats map[int64]*domainfeed.Fe
 	return err
 }
 
+// SetVideoStat 写入单个视频的计数缓存，用于评论写入后刷新 Feed 展示。
+func (c *FeedCache) SetVideoStat(ctx context.Context, stat *domaininteraction.VideoStat) error {
+	if stat == nil || stat.VideoID <= 0 {
+		return nil
+	}
+	return setActionStatJSON(ctx, c.client, feedStatKey(stat.VideoID), videoStatToFeedStat(stat))
+}
+
+func videoStatToFeedStat(stat *domaininteraction.VideoStat) *domainfeed.FeedStat {
+	if stat == nil {
+		return nil
+	}
+	return &domainfeed.FeedStat{
+		VideoID:       stat.VideoID,
+		LikeCount:     stat.LikeCount,
+		CommentCount:  stat.CommentCount,
+		FavoriteCount: stat.FavoriteCount,
+	}
+}
+
 func (c *FeedCache) AddInboxItems(ctx context.Context, authorID int64, userIDs []int64, item *domainfeed.FeedPageItem, maxLen int64) error {
 	if authorID <= 0 || item == nil || item.VideoID <= 0 || item.PublishedAt.IsZero() || len(userIDs) == 0 {
 		return nil

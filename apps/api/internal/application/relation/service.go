@@ -41,6 +41,11 @@ type MessageWriter interface {
 	CreateFromEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string) (any, error)
 }
 
+// ActorMessageWriter 可在关注消息里携带触发用户资料。
+type ActorMessageWriter interface {
+	CreateFromActorEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string, actorID int64, actorNickname string, actorAvatarURL string) (any, error)
+}
+
 // FollowResult 是关注或取关后的关系状态和计数。
 type FollowResult struct {
 	UserID         int64
@@ -167,12 +172,38 @@ func (s *Service) notifyFollow(ctx context.Context, userID int64, targetUserID i
 		return
 	}
 	eventID := fmt.Sprintf("relation:follow:%d:%d", targetUserID, userID)
+	actor, _ := s.repo.GetUserProfile(ctx, userID)
+	if writer, ok := s.messageWriter.(ActorMessageWriter); ok {
+		actorNickname := ""
+		actorAvatarURL := ""
+		if actor != nil {
+			actorNickname = actor.Nickname
+			actorAvatarURL = actor.AvatarURL
+		}
+		_, _ = writer.CreateFromActorEvent(
+			ctx,
+			targetUserID,
+			domainmessage.TypeFollow,
+			"新增关注",
+			"关注了你",
+			eventID,
+			eventID,
+			userID,
+			actorNickname,
+			actorAvatarURL,
+		)
+		return
+	}
+	actorName := fmt.Sprintf("用户 %d", userID)
+	if actor != nil && actor.Nickname != "" {
+		actorName = actor.Nickname
+	}
 	_, _ = s.messageWriter.CreateFromEvent(
 		ctx,
 		targetUserID,
 		domainmessage.TypeFollow,
 		"新增关注",
-		fmt.Sprintf("用户 %d 关注了你", userID),
+		fmt.Sprintf("%s 关注了你", actorName),
 		eventID,
 		eventID,
 	)

@@ -142,6 +142,31 @@ func TestGetStatsReadsShardedCountersOnJSONMiss(t *testing.T) {
 	}
 }
 
+func TestSetVideoStatWritesJSONCache(t *testing.T) {
+	ctx := context.Background()
+	videoID := int64(1005)
+	redisClient := newActionStatFakeRedis()
+
+	err := setActionStatJSON(ctx, redisClient, feedStatKey(videoID), videoStatToFeedStat(&domaininteraction.VideoStat{
+		VideoID:       videoID,
+		LikeCount:     2,
+		CommentCount:  3,
+		FavoriteCount: 1,
+	}))
+	if err != nil {
+		t.Fatalf("SetVideoStat: %v", err)
+	}
+
+	stats, err := getStats(ctx, redisClient, []int64{videoID})
+	if err != nil {
+		t.Fatalf("getStats: %v", err)
+	}
+	stat := stats[videoID]
+	if stat == nil || stat.LikeCount != 2 || stat.CommentCount != 3 || stat.FavoriteCount != 1 {
+		t.Fatalf("unexpected stat: %+v", stat)
+	}
+}
+
 func TestActionStatBaseInitUsesInitialStat(t *testing.T) {
 	videoID := int64(1004)
 	initial := &domaininteraction.VideoStat{

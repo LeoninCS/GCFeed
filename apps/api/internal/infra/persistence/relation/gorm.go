@@ -25,6 +25,13 @@ type relationUserModel struct {
 	FollowedAt time.Time
 }
 
+type relationUserProfileModel struct {
+	UserID    int64
+	Nickname  string
+	AvatarURL string
+	Bio       string
+}
+
 // New 创建关系仓储实现。
 func New(db *gorm.DB) *Repository {
 	return &Repository{db: db}
@@ -166,6 +173,21 @@ func (r *Repository) ListFollowers(ctx context.Context, userID int64, cursor *do
 	}
 
 	return scanUserItems(query.Order("f.updated_at DESC").Order("f.user_id DESC").Limit(limit))
+}
+
+// GetUserProfile 读取用户展示资料，用于关注通知。
+func (r *Repository) GetUserProfile(ctx context.Context, userID int64) (*domainrelation.UserProfile, error) {
+	var model relationUserProfileModel
+	err := r.db.WithContext(ctx).
+		Table("account").
+		Select("id AS user_id, nickname, avatar_url, bio").
+		Where("id = ? AND status = ?", userID, domainaccount.StatusNormal).
+		Take(&model).
+		Error
+	if err != nil {
+		return nil, mapUserError(err)
+	}
+	return domainrelation.RestoreUserProfile(model.UserID, model.Nickname, model.AvatarURL, model.Bio), nil
 }
 
 func scanUserItems(query *gorm.DB) ([]*domainrelation.UserItem, error) {

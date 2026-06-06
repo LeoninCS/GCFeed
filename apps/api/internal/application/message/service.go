@@ -50,6 +50,11 @@ func New(repo domainmessage.Repository) *Service {
 
 // CreateFromEvent 将内部事件转换成用户消息，eventID/idempotencyKey 命中时返回既有消息。
 func (s *Service) CreateFromEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string) (*CreateResult, error) {
+	return s.CreateFromActorEvent(ctx, userID, messageType, title, content, eventID, idempotencyKey, 0, "", "")
+}
+
+// CreateFromActorEvent 将内部事件转换成带触发用户信息的消息。
+func (s *Service) CreateFromActorEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string, actorID int64, actorNickname string, actorAvatarURL string) (*CreateResult, error) {
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if len(idempotencyKey) > domainmessage.MaxIdempotencyKeyLength {
 		return nil, domainmessage.ErrIdempotencyKeyTooLong
@@ -59,6 +64,7 @@ func (s *Service) CreateFromEvent(ctx context.Context, userID int64, messageType
 	if err != nil {
 		return nil, err
 	}
+	message.WithActor(actorID, actorNickname, actorAvatarURL)
 
 	created, inserted, err := s.repo.Create(ctx, message, idempotencyKey)
 	if err != nil {

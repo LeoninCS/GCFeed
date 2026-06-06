@@ -26,6 +26,7 @@ var ErrUpdateInteractionFailed = errors.New("failed to update interaction")
 type Service struct {
 	repo             domaininteraction.Repository
 	hotScoreRecorder HotScoreRecorder
+	statCache        StatCache
 	actionStateStore ActionStateStore
 	actionPublisher  ActionEventPublisher
 	messageWriter    MessageWriter
@@ -34,6 +35,11 @@ type Service struct {
 // HotScoreRecorder 把互动变化投递到热榜分钟桶。
 type HotScoreRecorder interface {
 	AddHotScore(ctx context.Context, videoID int64, scoreDelta int, at time.Time) error
+}
+
+// StatCache 同步 Feed 展示所需的视频互动计数缓存。
+type StatCache interface {
+	SetVideoStat(ctx context.Context, stat *domaininteraction.VideoStat) error
 }
 
 type Option func(*Service)
@@ -61,6 +67,11 @@ type ActionEventPublisher interface {
 // MessageWriter 写入互动触发的站内消息。
 type MessageWriter interface {
 	CreateFromEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string) (any, error)
+}
+
+// ActorMessageWriter 可在消息里携带触发互动的用户资料。
+type ActorMessageWriter interface {
+	CreateFromActorEvent(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, idempotencyKey string, actorID int64, actorNickname string, actorAvatarURL string) (any, error)
 }
 
 type ActionChangedEvent struct {
@@ -115,6 +126,13 @@ func New(repo domaininteraction.Repository, options ...Option) *Service {
 func WithHotScoreRecorder(recorder HotScoreRecorder) Option {
 	return func(s *Service) {
 		s.hotScoreRecorder = recorder
+	}
+}
+
+// WithStatCache 为评论写入后的 Feed 计数展示启用缓存同步。
+func WithStatCache(cache StatCache) Option {
+	return func(s *Service) {
+		s.statCache = cache
 	}
 }
 
@@ -184,6 +202,7 @@ func (s *Service) CreateComment(ctx context.Context, userID int64, videoID int64
 		return nil, ErrSaveInteractionFailed
 	}
 	s.recordHotScore(ctx, created.VideoID, delta*hotScoreCommentWeight)
+	s.syncCommentCount(ctx, created.VideoID, count)
 	if delta > 0 {
 		s.notifyComment(ctx, created)
 	}
@@ -247,6 +266,7 @@ func (s *Service) DeleteComment(ctx context.Context, commentID int64, userID int
 		return nil, ErrUpdateInteractionFailed
 	}
 	s.recordHotScore(ctx, comment.VideoID, delta*hotScoreCommentWeight)
+	s.syncCommentCount(ctx, comment.VideoID, count)
 
 	return &DeleteCommentResult{
 		CommentID:    comment.ID,
@@ -351,6 +371,18 @@ func (s *Service) recordHotScore(ctx context.Context, videoID int64, scoreDelta 
 	recordHotScore(ctx, s.hotScoreRecorder, videoID, scoreDelta)
 }
 
+func (s *Service) syncCommentCount(ctx context.Context, videoID int64, commentCount int) {
+	if s.statCache == nil || videoID <= 0 {
+		return
+	}
+	stat, err := s.repo.GetVideoStat(ctx, videoID)
+	if err != nil {
+		stat = &domaininteraction.VideoStat{VideoID: videoID}
+	}
+	stat.CommentCount = commentCount
+	_ = s.statCache.SetVideoStat(ctx, stat)
+}
+
 func recordActionHotScore(ctx context.Context, recorder HotScoreRecorder, videoID int64, actionType string, delta int) {
 	if actionType == domaininteraction.ActionTypeLike {
 		recordHotScore(ctx, recorder, videoID, delta*hotScoreLikeWeight)
@@ -387,15 +419,7 @@ func (s *Service) notifyLike(ctx context.Context, action *domaininteraction.Acti
 		return
 	}
 	eventID := fmt.Sprintf("interaction:like:%d:%d", action.VideoID, action.UserID)
-	_, _ = s.messageWriter.CreateFromEvent(
-		ctx,
-		authorID,
-		domainmessage.TypeLike,
-		"收到点赞",
-		fmt.Sprintf("用户 %d 点赞了你的视频 %d", action.UserID, action.VideoID),
-		eventID,
-		eventID,
-	)
+	s.createInteractionMessage(ctx, authorID, domainmessage.TypeLike, "收到点赞", "点赞了你的视频", eventID, action.UserID)
 }
 
 func (s *Service) notifyComment(ctx context.Context, comment *domaininteraction.Comment) {
@@ -407,15 +431,26 @@ func (s *Service) notifyComment(ctx context.Context, comment *domaininteraction.
 		return
 	}
 	eventID := fmt.Sprintf("interaction:comment:%d", comment.ID)
-	_, _ = s.messageWriter.CreateFromEvent(
-		ctx,
-		authorID,
-		domainmessage.TypeComment,
-		"收到评论",
-		fmt.Sprintf("用户 %d 评论了你的视频 %d", comment.UserID, comment.VideoID),
-		eventID,
-		eventID,
-	)
+	s.createInteractionMessage(ctx, authorID, domainmessage.TypeComment, "收到评论", comment.Content, eventID, comment.UserID)
+}
+
+func (s *Service) createInteractionMessage(ctx context.Context, userID int64, messageType string, title string, content string, eventID string, actorID int64) {
+	actor, _ := s.repo.GetUserProfile(ctx, actorID)
+	if writer, ok := s.messageWriter.(ActorMessageWriter); ok {
+		actorNickname := ""
+		actorAvatarURL := ""
+		if actor != nil {
+			actorNickname = actor.Nickname
+			actorAvatarURL = actor.AvatarURL
+		}
+		_, _ = writer.CreateFromActorEvent(ctx, userID, messageType, title, content, eventID, eventID, actorID, actorNickname, actorAvatarURL)
+		return
+	}
+	actorName := fmt.Sprintf("用户 %d", actorID)
+	if actor != nil && actor.Nickname != "" {
+		actorName = actor.Nickname
+	}
+	_, _ = s.messageWriter.CreateFromEvent(ctx, userID, messageType, title, fmt.Sprintf("%s %s", actorName, content), eventID, eventID)
 }
 
 func newEventID() string {

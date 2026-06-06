@@ -60,6 +60,13 @@ type VideoStat struct {
 	FavoriteCount int
 }
 
+// UserProfile 保存互动消息需要展示的用户资料。
+type UserProfile struct {
+	ID        int64
+	Nickname  string
+	AvatarURL string
+}
+
 // NormalizeActionType 统一行为类型大小写，避免外层传入 like、LIKE 等不同写法。
 func NormalizeActionType(value string) (string, error) {
 	value = strings.ToUpper(strings.TrimSpace(value))

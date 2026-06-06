@@ -32,6 +32,12 @@ type commentWithUserModel struct {
 	UpdatedAt      time.Time
 }
 
+type userProfileModel struct {
+	ID        int64
+	Nickname  string
+	AvatarURL string
+}
+
 func New(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
@@ -68,6 +74,25 @@ func (r *Repository) GetVideoAuthorID(ctx context.Context, videoID int64) (int64
 		return 0, mapVideoError(err)
 	}
 	return video.AuthorID, nil
+}
+
+// GetUserProfile 读取用户展示资料，用于互动消息展示触发者。
+func (r *Repository) GetUserProfile(ctx context.Context, userID int64) (*domaininteraction.UserProfile, error) {
+	var model userProfileModel
+	err := r.db.WithContext(ctx).
+		Table("account").
+		Select("id, nickname, avatar_url").
+		Where("id = ? AND status = ?", userID, domainaccount.StatusNormal).
+		Take(&model).
+		Error
+	if err != nil {
+		return nil, mapUserError(err)
+	}
+	return &domaininteraction.UserProfile{
+		ID:        model.ID,
+		Nickname:  strings.TrimSpace(model.Nickname),
+		AvatarURL: strings.TrimSpace(model.AvatarURL),
+	}, nil
 }
 
 // SetAction 写入点赞或收藏状态，并在同一事务内维护视频统计计数。
@@ -514,6 +539,17 @@ func mapVideoError(err error) error {
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return domaininteraction.ErrVideoNotFound
+	}
+	return err
+}
+
+// mapUserError 把 GORM 找不到记录转换为互动领域的用户 ID 错误。
+func mapUserError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return domaininteraction.ErrInvalidUserID
 	}
 	return err
 }

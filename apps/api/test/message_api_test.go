@@ -22,15 +22,18 @@ import (
 const testInternalToken = "test-internal-token"
 
 type messageAPIResponse struct {
-	ID        int64      `json:"id"`
-	UserID    int64      `json:"user_id"`
-	Type      string     `json:"type"`
-	Title     string     `json:"title"`
-	Content   string     `json:"content"`
-	EventID   string     `json:"event_id"`
-	IsRead    bool       `json:"is_read"`
-	CreatedAt time.Time  `json:"created_at"`
-	ReadAt    *time.Time `json:"read_at"`
+	ID             int64      `json:"id"`
+	UserID         int64      `json:"user_id"`
+	Type           string     `json:"type"`
+	Title          string     `json:"title"`
+	Content        string     `json:"content"`
+	EventID        string     `json:"event_id"`
+	ActorID        int64      `json:"actor_id"`
+	ActorNickname  string     `json:"actor_nickname"`
+	ActorAvatarURL string     `json:"actor_avatar_url"`
+	IsRead         bool       `json:"is_read"`
+	CreatedAt      time.Time  `json:"created_at"`
+	ReadAt         *time.Time `json:"read_at"`
 }
 
 type messageListAPIResponse struct {
@@ -191,7 +194,7 @@ func TestMessageAPIFlow(t *testing.T) {
 		router,
 		http.MethodPost,
 		"/internal/messages",
-		`{"user_id":42,"type":"like","title":"收到点赞","content":"你的作品收到了点赞","event_id":"evt-1"}`,
+		`{"user_id":42,"type":"like","title":"收到点赞","content":"点赞了你的视频","event_id":"evt-1","actor_id":77,"actor_nickname":"测试用户","actor_avatar_url":"https://cdn.test/avatar.png"}`,
 		testInternalToken,
 		"msg-1",
 	)
@@ -201,6 +204,9 @@ func TestMessageAPIFlow(t *testing.T) {
 	decodeJSON(t, firstResponse, &first)
 	if first.ID == 0 || first.UserID != 42 || first.Type != domainmessage.TypeLike || first.IsRead {
 		t.Fatalf("unexpected created message: %+v", first)
+	}
+	if first.ActorID != 77 || first.ActorNickname != "测试用户" || first.ActorAvatarURL != "https://cdn.test/avatar.png" {
+		t.Fatalf("unexpected created actor: %+v", first)
 	}
 
 	replayResponse := performInternalMessageRequest(
@@ -217,6 +223,9 @@ func TestMessageAPIFlow(t *testing.T) {
 	decodeJSON(t, replayResponse, &replay)
 	if replay.ID != first.ID || replay.Title != first.Title {
 		t.Fatalf("expected idempotent replay, got %+v", replay)
+	}
+	if replay.ActorID != 77 || replay.ActorNickname != "测试用户" || replay.ActorAvatarURL != "https://cdn.test/avatar.png" {
+		t.Fatalf("unexpected replay actor: %+v", replay)
 	}
 
 	requireStatus(t, performInternalMessageRequest(router, http.MethodPost, "/internal/messages", `{"user_id":42,"type":"comment","title":"收到评论","content":"有人评论了你的作品","event_id":"evt-2"}`, testInternalToken, "msg-2"), http.StatusCreated)

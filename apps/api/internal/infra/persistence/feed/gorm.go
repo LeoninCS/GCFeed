@@ -2,6 +2,7 @@ package infrafeed
 
 import (
 	domainfeed "GCFeed/internal/domain/feed"
+	domaininteraction "GCFeed/internal/domain/interaction"
 	domainrelation "GCFeed/internal/domain/relation"
 	domainvideo "GCFeed/internal/domain/video"
 	"context"
@@ -14,6 +15,11 @@ const hotScoreExpression = "COALESCE(vs.like_count, 0) * 3 + COALESCE(vs.comment
 
 type Repository struct {
 	db *gorm.DB
+}
+
+type viewerActionStateModel struct {
+	VideoID    int64
+	ActionType string
 }
 
 // New 创建 Feed 仓储实现。
@@ -240,6 +246,43 @@ func (r *Repository) BatchGetFeedStats(ctx context.Context, videoIDs []int64) (m
 		stats[models[index].VideoID] = &models[index]
 	}
 	return stats, nil
+}
+
+// BatchGetViewerActionStates 批量读取当前用户对视频的点赞和收藏状态。
+func (r *Repository) BatchGetViewerActionStates(ctx context.Context, viewerID int64, videoIDs []int64) (map[int64]*domainfeed.ViewerActionState, error) {
+	states := map[int64]*domainfeed.ViewerActionState{}
+	if viewerID <= 0 || len(videoIDs) == 0 {
+		return states, nil
+	}
+	for _, videoID := range videoIDs {
+		states[videoID] = &domainfeed.ViewerActionState{VideoID: videoID}
+	}
+
+	var models []viewerActionStateModel
+	err := r.db.WithContext(ctx).
+		Table("interaction_action").
+		Select("video_id, action_type").
+		Where("user_id = ? AND video_id IN ? AND status = ?", viewerID, videoIDs, domaininteraction.ActionStatusActive).
+		Where("action_type IN ?", []string{domaininteraction.ActionTypeLike, domaininteraction.ActionTypeFavorite}).
+		Scan(&models).
+		Error
+	if err != nil {
+		return nil, err
+	}
+	for _, model := range models {
+		state := states[model.VideoID]
+		if state == nil {
+			state = &domainfeed.ViewerActionState{VideoID: model.VideoID}
+			states[model.VideoID] = state
+		}
+		switch model.ActionType {
+		case domaininteraction.ActionTypeLike:
+			state.Liked = true
+		case domaininteraction.ActionTypeFavorite:
+			state.Favorited = true
+		}
+	}
+	return states, nil
 }
 
 func (r *Repository) basePageQuery(ctx context.Context) *gorm.DB {

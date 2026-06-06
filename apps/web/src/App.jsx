@@ -450,8 +450,11 @@ function FeedPage({ feedScene, session, onNavigate }) {
     fetchFeedPage(feedScene, session.token, "", requestID)
       .then((data) => {
         if (!live) return;
+        const nextItems = (data.items || []).map((item) => mapFeedItem(item, feedScene, requestID));
         setSwipe(null);
-        setItems((data.items || []).map((item) => mapFeedItem(item, feedScene, requestID)));
+        setItems(nextItems);
+        setLiked(viewerActionMap(nextItems, "liked"));
+        setFavorited(viewerActionMap(nextItems, "favorited"));
         setIndex(0);
         setCommentsOpen(false);
         setNextCursor(data.next_cursor || "");
@@ -490,6 +493,8 @@ function FeedPage({ feedScene, session, onNavigate }) {
       .then((data) => {
         const nextItems = (data.items || []).map((item) => mapFeedItem(item, feedScene, requestID));
         setItems((state) => appendFeedItems(state, nextItems));
+        mergeViewerActions(nextItems, setLiked, "liked");
+        mergeViewerActions(nextItems, setFavorited, "favorited");
         setNextCursor(data.next_cursor || "");
         setHasMore(Boolean(data.has_more && data.next_cursor));
       })
@@ -751,7 +756,11 @@ function FeedPage({ feedScene, session, onNavigate }) {
     apiRequest(`/api/videos/${current.video_id}/comments?limit=50`)
       .then((data) => {
         if (!live) return;
-        setComments(data.items || []);
+        const nextComments = data.items || [];
+        setComments(nextComments);
+        if (!data.has_more && nextComments.length > Number(current.comment_count || 0)) {
+          updateCurrentItem(current.video_id, { comment_count: nextComments.length });
+        }
         setCommentsState("ready");
       })
       .catch((error) => {
@@ -1445,27 +1454,37 @@ function MessagesPage({ session, onNavigate, onUnreadChange }) {
         {state === "ready" && items.length === 0 && <PageMessage icon="notifications" title="暂无消息" />}
         {error && items.length > 0 && <p className="form-message">{error}</p>}
         <div className="messages-list">
-          {items.map((message) => (
-            <button
-              className={`message-item ${message.is_read ? "read" : "unread"}`}
-              key={message.id}
-              type="button"
-              onClick={() => markMessageRead(message)}
-              disabled={busyID === message.id}
-            >
-              <span className={`message-icon ${message.is_read ? "" : "active"}`}>
-                <span className="material-symbols-outlined">{messageIcon(message.type)}</span>
-              </span>
-              <span className="message-copy">
-                <span className="message-title-row">
-                  <strong>{message.title}</strong>
-                  <small>{formatRelativeTime(message.created_at)}</small>
+          {items.map((message) => {
+            const actor = messageActor(message);
+            const body = messageBody(message);
+            return (
+              <button
+                className={`message-item ${message.is_read ? "read" : "unread"}`}
+                key={message.id}
+                type="button"
+                onClick={() => markMessageRead(message)}
+                disabled={busyID === message.id}
+              >
+                <span className={`message-icon ${message.is_read ? "" : "active"}`}>
+                  <span className="material-symbols-outlined">{messageIcon(message.type)}</span>
                 </span>
-                <span>{message.content}</span>
-              </span>
-              <span className="message-state">{message.is_read ? "已读" : busyID === message.id ? "处理中" : "未读"}</span>
-            </button>
-          ))}
+                <span className="message-copy">
+                  <span className="message-title-row">
+                    <strong>{message.title}</strong>
+                    <small>{formatRelativeTime(message.created_at)}</small>
+                  </span>
+                  {actor && (
+                    <span className="message-actor-row">
+                      <img src={actor.avatar_url} alt="" />
+                      <strong>{actor.nickname}</strong>
+                    </span>
+                  )}
+                  <span className="message-content-text">{body}</span>
+                </span>
+                <span className="message-state">{message.is_read ? "已读" : busyID === message.id ? "处理中" : "未读"}</span>
+              </button>
+            );
+          })}
         </div>
         {hasMore && (
           <button className="ghost-button messages-more" onClick={() => loadMessages(nextCursor, true)} disabled={loadingMore}>
@@ -2369,6 +2388,29 @@ function appendMessages(currentItems, nextItems) {
   return merged;
 }
 
+function viewerActionMap(items, field) {
+  const map = {};
+  for (const item of items) {
+    if (item?.video_id && item[field]) {
+      map[item.video_id] = true;
+    }
+  }
+  return map;
+}
+
+function mergeViewerActions(items, setMap, field) {
+  if (!items.length) return;
+  setMap((state) => {
+    const next = { ...state };
+    for (const item of items) {
+      if (item?.video_id) {
+        next[item.video_id] = Boolean(item[field]);
+      }
+    }
+    return next;
+  });
+}
+
 function normalizePlaybackConfig(config) {
   const preloadCount = Number(config?.preload_count);
   const bufferMs = Number(config?.buffer_ms);
@@ -2530,6 +2572,28 @@ function profileFromComment(comment) {
   };
 }
 
+function messageActor(message) {
+  const id = Number(message?.actor_id || 0);
+  const nickname = (message?.actor_nickname || legacyMessageActorName(message?.content) || (id ? `用户_${id}` : "")).trim();
+  if (!id && !nickname) return null;
+  return {
+    id,
+    nickname: nickname || `用户_${id}`,
+    avatar_url: message?.actor_avatar_url || image.currentUser
+  };
+}
+
+function messageBody(message) {
+  const content = String(message?.content || "").trim();
+  if (message?.actor_id || message?.actor_nickname) return content;
+  return content.replace(/^用户\s*\d+\s*/, "").trim() || content;
+}
+
+function legacyMessageActorName(content) {
+  const match = /^用户\s*(\d+)/.exec(String(content || "").trim());
+  return match ? `用户_${match[1]}` : "";
+}
+
 function messageIcon(type) {
   switch (String(type || "").toUpperCase()) {
     case "LIKE":
@@ -2675,6 +2739,8 @@ function mapFeedItem(item, feedScene = "timeline", requestID = "") {
     like_count: item.like_count,
     comment_count: item.comment_count,
     favorite_count: item.favorite_count,
+    liked: Boolean(item.liked),
+    favorited: Boolean(item.favorited),
     author: item.author_nickname || `创作者_${item.author_id}`,
     avatar_url: item.author_avatar_url || image.creator,
     description: item.description || "",

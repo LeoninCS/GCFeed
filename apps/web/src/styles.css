@@ -1305,7 +1305,7 @@ textarea:focus {
 
 .message-copy {
   display: grid;
-  gap: 6px;
+  gap: 7px;
   min-width: 0;
 }
 
@@ -1332,7 +1332,34 @@ textarea:focus {
   font-weight: 700;
 }
 
-.message-copy > span:last-child {
+.message-actor-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.message-actor-row img {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  object-fit: cover;
+}
+
+.message-actor-row strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-content-text {
   overflow: hidden;
   color: var(--muted);
   font-size: 13px;

@@ -31,5 +31,7 @@ type feedItemResponse struct {
 	LikeCount       int       `json:"like_count"`
 	CommentCount    int       `json:"comment_count"`
 	FavoriteCount   int       `json:"favorite_count"`
+	Liked           bool      `json:"liked"`
+	Favorited       bool      `json:"favorited"`
 	PublishedAt     time.Time `json:"published_at"`
 }

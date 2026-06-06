@@ -20,15 +20,18 @@ const (
 
 // Message 表示一个用户收到的站内通知。
 type Message struct {
-	ID        int64
-	UserID    int64
-	Type      string
-	Title     string
-	Content   string
-	EventID   string
-	IsRead    bool
-	CreatedAt time.Time
-	ReadAt    *time.Time
+	ID             int64
+	UserID         int64
+	Type           string
+	Title          string
+	Content        string
+	EventID        string
+	ActorID        int64
+	ActorNickname  string
+	ActorAvatarURL string
+	IsRead         bool
+	CreatedAt      time.Time
+	ReadAt         *time.Time
 }
 
 // Cursor 保存消息列表分页的排序字段。
@@ -77,6 +80,18 @@ func New(userID int64, messageType string, title string, content string, eventID
 	}, nil
 }
 
+// WithActor 写入触发消息的用户展示信息。
+func (m *Message) WithActor(actorID int64, nickname string, avatarURL string) {
+	if m == nil {
+		return
+	}
+	if actorID > 0 {
+		m.ActorID = actorID
+	}
+	m.ActorNickname = strings.TrimSpace(nickname)
+	m.ActorAvatarURL = strings.TrimSpace(avatarURL)
+}
+
 // Restore 从数据库记录恢复消息领域对象。
 func Restore(id int64, userID int64, messageType string, title string, content string, eventID string, isRead bool, createdAt time.Time, readAt *time.Time) *Message {
 	messageType, _ = NormalizeType(messageType)
@@ -91,6 +106,13 @@ func Restore(id int64, userID int64, messageType string, title string, content s
 		CreatedAt: createdAt,
 		ReadAt:    readAt,
 	}
+}
+
+// RestoreWithActor 从数据库记录恢复带触发用户信息的消息。
+func RestoreWithActor(id int64, userID int64, messageType string, title string, content string, eventID string, actorID int64, actorNickname string, actorAvatarURL string, isRead bool, createdAt time.Time, readAt *time.Time) *Message {
+	message := Restore(id, userID, messageType, title, content, eventID, isRead, createdAt, readAt)
+	message.WithActor(actorID, actorNickname, actorAvatarURL)
+	return message
 }
 
 // NormalizeType 统一消息类型大小写。
