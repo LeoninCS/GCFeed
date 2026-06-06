@@ -119,23 +119,9 @@ docker compose config
 
 ### Feed 压测
 
-Feed 压测脚本位于 `scripts/feed-load.js`，项目启动后运行：
+详细步骤见 [docs/performance-testing.md](docs/performance-testing.md)，包括最新流、热门榜单、推荐流、极限 QPS 和 Grafana 指标解读。
 
-```bash
-ACCOUNT="你的账号" PASSWORD="你的密码" k6 run scripts/feed-load.js
-```
-
-常用参数：
-
-```bash
-SCENE=timeline VUS=20 DURATION=60s k6 run scripts/feed-load.js
-SCENE=hot VUS=20 DURATION=60s k6 run scripts/feed-load.js
-ACCOUNT="你的账号" PASSWORD="你的密码" SCENE=recommend VUS=20 DURATION=60s k6 run scripts/feed-load.js
-```
-
-脚本会优先使用 `TOKEN`，传入 `ACCOUNT` 和 `PASSWORD` 时会先调用 `/api/sessions` 获取登录态。
-
-重点查看 `http_req_duration` 的 `avg`、`p(95)`、`http_req_failed` 和 `feed_success_rate`。
+重点查看 `http_reqs` 后面的 `/s`、`http_req_duration p(95)`、`http_req_failed` 和 `feed_success_rate`。
 
 ### 监控面板
 
@@ -174,6 +160,7 @@ Prometheus 抓取目标：
 | [docs/architecture.md](docs/architecture.md) | 系统架构、分层、核心链路、数据模型 |
 | [docs/engineering.md](docs/engineering.md) | 工程规范、目录规则、API 风格、测试约定 |
 | [docs/optimization.md](docs/optimization.md) | Feed 性能和稳定性专题 |
+| [docs/performance-testing.md](docs/performance-testing.md) | k6 压测、QPS/P95 解读、Grafana 指标观察 |
 | [docs/uiux.md](docs/uiux.md) | Web 客户端 UI/UX 规格 |
 | [docs/modules/](docs/modules/README.md) | 各业务模块设计 |
 | [openspec/](openspec/) | OpenSpec 项目基线和变更规格 |
