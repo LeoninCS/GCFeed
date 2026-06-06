@@ -5,6 +5,7 @@ import (
 	applicationinteraction "GCFeed/internal/application/interaction"
 	applicationvideo "GCFeed/internal/application/video"
 	infraconfig "GCFeed/internal/infra/config"
+	inframetrics "GCFeed/internal/infra/metrics"
 	"context"
 	"encoding/json"
 	"errors"
@@ -174,15 +175,19 @@ func (r *RabbitMQ) ConsumeActionChanged(ctx context.Context, handler func(contex
 
 	go func() {
 		for delivery := range deliveries {
+			start := time.Now()
 			var event applicationinteraction.ActionChangedEvent
 			if err := json.Unmarshal(delivery.Body, &event); err != nil {
+				inframetrics.ObserveWorkerJob("mq_action_changed_decode", time.Since(start), err)
 				_ = delivery.Nack(false, false)
 				continue
 			}
 			if err := handler(ctx, &event); err != nil {
+				inframetrics.ObserveWorkerJob("mq_action_changed_consume", time.Since(start), err)
 				_ = delivery.Nack(false, true)
 				continue
 			}
+			inframetrics.ObserveWorkerJob("mq_action_changed_consume", time.Since(start), nil)
 			_ = delivery.Ack(false)
 		}
 	}()
@@ -214,15 +219,19 @@ func (r *RabbitMQ) consumeVideoPublishedQueue(ctx context.Context, queue string,
 
 	go func() {
 		for delivery := range deliveries {
+			start := time.Now()
 			var event applicationvideo.PublishedEvent
 			if err := json.Unmarshal(delivery.Body, &event); err != nil {
+				inframetrics.ObserveWorkerJob("mq_video_published_decode", time.Since(start), err)
 				_ = delivery.Nack(false, false)
 				continue
 			}
 			if err := handler(ctx, &event); err != nil {
+				inframetrics.ObserveWorkerJob("mq_video_published_consume", time.Since(start), err)
 				_ = delivery.Nack(false, true)
 				continue
 			}
+			inframetrics.ObserveWorkerJob("mq_video_published_consume", time.Since(start), nil)
 			_ = delivery.Ack(false)
 		}
 	}()
@@ -246,15 +255,19 @@ func (r *RabbitMQ) ConsumeViewEventRecorded(ctx context.Context, handler func(co
 
 	go func() {
 		for delivery := range deliveries {
+			start := time.Now()
 			var event applicationexposure.ViewEventRecordedEvent
 			if err := json.Unmarshal(delivery.Body, &event); err != nil {
+				inframetrics.ObserveWorkerJob("mq_view_event_decode", time.Since(start), err)
 				_ = delivery.Nack(false, false)
 				continue
 			}
 			if err := handler(ctx, &event); err != nil {
+				inframetrics.ObserveWorkerJob("mq_view_event_consume", time.Since(start), err)
 				_ = delivery.Nack(false, true)
 				continue
 			}
+			inframetrics.ObserveWorkerJob("mq_view_event_consume", time.Since(start), nil)
 			_ = delivery.Ack(false)
 		}
 	}()

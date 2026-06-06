@@ -2,6 +2,7 @@ package applicationvideo
 
 import (
 	domainfeed "GCFeed/internal/domain/feed"
+	inframetrics "GCFeed/internal/infra/metrics"
 	"context"
 	"time"
 )
@@ -110,11 +111,16 @@ func (w *FanoutWorker) Start(ctx context.Context) error {
 	return w.consumer.ConsumeVideoPublished(ctx, w.HandleVideoPublished)
 }
 
-func (w *FanoutWorker) HandleVideoPublished(ctx context.Context, event *PublishedEvent) error {
+func (w *FanoutWorker) HandleVideoPublished(ctx context.Context, event *PublishedEvent) (err error) {
+	start := time.Now()
+	defer func() {
+		inframetrics.ObserveWorkerJob("video_fanout", time.Since(start), err)
+	}()
+
 	if event == nil || event.VideoID <= 0 || event.AuthorID <= 0 {
 		return nil
 	}
-	if err := w.preheat(ctx, event); err != nil {
+	if err = w.preheat(ctx, event); err != nil {
 		return err
 	}
 	if w.repo == nil || w.index == nil {
@@ -144,7 +150,7 @@ func (w *FanoutWorker) HandleVideoPublished(ctx context.Context, event *Publishe
 		if len(followerIDs) == 0 {
 			return nil
 		}
-		if err := w.index.AddInboxItems(ctx, event.AuthorID, followerIDs, item, w.inboxMaxLen); err != nil {
+		if err = w.index.AddInboxItems(ctx, event.AuthorID, followerIDs, item, w.inboxMaxLen); err != nil {
 			return err
 		}
 		cursor = followerIDs[len(followerIDs)-1]

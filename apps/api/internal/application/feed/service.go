@@ -3,6 +3,7 @@ package applicationfeed
 import (
 	applicationrecommendation "GCFeed/internal/application/recommendation"
 	domainfeed "GCFeed/internal/domain/feed"
+	inframetrics "GCFeed/internal/infra/metrics"
 	"context"
 	"crypto/sha1"
 	"encoding/base64"
@@ -192,6 +193,7 @@ func (s *Service) RegisterStrategy(strategy Strategy) {
 
 // GetFeed 根据 scene 选择策略并返回分页结果。
 func (s *Service) GetFeed(ctx context.Context, req FeedRequest) (*FeedResult, error) {
+	start := time.Now()
 	req.Scene = domainfeed.NormalizeScene(req.Scene)
 	if req.Scene == "" {
 		req.Scene = s.defaultScene
@@ -199,9 +201,16 @@ func (s *Service) GetFeed(ctx context.Context, req FeedRequest) (*FeedResult, er
 
 	strategy, ok := s.strategies[req.Scene]
 	if !ok {
+		inframetrics.ObserveFeed(string(req.Scene), time.Since(start), 0, domainfeed.ErrUnsupportedScene)
 		return nil, domainfeed.ErrUnsupportedScene
 	}
-	return strategy.List(ctx, req)
+	result, err := strategy.List(ctx, req)
+	itemCount := 0
+	if result != nil {
+		itemCount = len(result.Items)
+	}
+	inframetrics.ObserveFeed(string(req.Scene), time.Since(start), itemCount, err)
+	return result, err
 }
 
 // GetTimelineFeed 使用 cursor+limit 读取时间线 Feed。

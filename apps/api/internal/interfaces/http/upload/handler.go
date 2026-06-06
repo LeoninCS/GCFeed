@@ -1,6 +1,7 @@
 package interfaceshttpupload
 
 import (
+	inframetrics "GCFeed/internal/infra/metrics"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -115,23 +116,34 @@ func NewWithProcessor(root string, processor UploadProcessor) *Handler {
 
 // Create 接收 multipart/form-data 文件，并按 kind 保存到不同子目录。
 func (h *Handler) Create(c *gin.Context) {
+	start := time.Now()
+	kind := "unknown"
+	var resultErr error
+	defer func() {
+		inframetrics.ObserveUpload(kind, time.Since(start), resultErr)
+	}()
+
 	// MaxBytesReader 在读取请求体前限制上传大小，避免大文件撑爆内存或磁盘。
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadBytes)
 
 	file, err := c.FormFile("file")
 	if err != nil {
+		resultErr = err
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
 		return
 	}
 
-	kind, ok := normalizeKind(c.PostForm("kind"))
+	normalizedKind, ok := normalizeKind(c.PostForm("kind"))
 	if !ok {
+		resultErr = errors.New("invalid upload kind")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid upload kind"})
 		return
 	}
+	kind = normalizedKind
 
 	validation, err := validateUploadFile(file, kind)
 	if err != nil {
+		resultErr = err
 		writeUploadValidationError(c, err)
 		return
 	}
@@ -140,24 +152,28 @@ func (h *Handler) Create(c *gin.Context) {
 	filename := fmt.Sprintf("%d-%s%s", time.Now().UnixNano(), randomSuffix(), validation.Ext)
 	targetDir := filepath.Join(h.root, kind)
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		resultErr = err
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare upload directory"})
 		return
 	}
 
 	targetPath := filepath.Join(targetDir, filename)
 	if err := c.SaveUploadedFile(file, targetPath); err != nil {
+		resultErr = err
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save upload"})
 		return
 	}
 
 	if kind == "video" {
 		if err := h.processor.ValidateVideo(c.Request.Context(), targetPath); err != nil {
+			resultErr = err
 			_ = os.Remove(targetPath)
 			writeUploadProcessingError(c, err)
 			return
 		}
 		if shouldFaststart(validation.Ext) {
 			if err := h.processor.Faststart(c.Request.Context(), targetPath); err != nil {
+				resultErr = err
 				_ = os.Remove(targetPath)
 				writeUploadProcessingError(c, err)
 				return
@@ -298,15 +314,22 @@ func shouldFaststart(ext string) bool {
 type defaultUploadProcessor struct{}
 
 func (defaultUploadProcessor) ValidateVideo(ctx context.Context, path string) error {
+	start := time.Now()
 	metadata, err := probeVideo(ctx, path)
 	if err != nil {
+		inframetrics.ObserveVideoProcessing("probe", time.Since(start), err)
 		return err
 	}
-	return validateVideoMetadata(metadata)
+	err = validateVideoMetadata(metadata)
+	inframetrics.ObserveVideoProcessing("probe", time.Since(start), err)
+	return err
 }
 
 func (defaultUploadProcessor) Faststart(ctx context.Context, path string) error {
-	return faststartVideo(ctx, path)
+	start := time.Now()
+	err := faststartVideo(ctx, path)
+	inframetrics.ObserveVideoProcessing("faststart", time.Since(start), err)
+	return err
 }
 
 type probeResult struct {

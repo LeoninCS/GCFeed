@@ -41,6 +41,7 @@ import (
 	"log"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -128,6 +129,7 @@ func Register(g *gin.Engine, cfg *infraconfig.Config, db *sql.DB) error {
 	uploadHandler := interfaceshttpupload.New("./uploads")
 
 	g.GET("/health", HealthCheck)
+	g.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	// 静态文件路由让上传后的文件可以通过 /uploads/... 访问。
 	g.Static("/uploads", "./uploads")
 

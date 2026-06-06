@@ -2,6 +2,7 @@ package infrahttpgin
 
 import (
 	infraconfig "GCFeed/internal/infra/config"
+	inframetrics "GCFeed/internal/infra/metrics"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -11,6 +12,7 @@ import (
 func Init() *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	g := gin.Default()
+	g.Use(inframetrics.HTTPMiddleware())
 	return g
 }
 

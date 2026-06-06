@@ -13,6 +13,7 @@ import (
 	infracache "GCFeed/internal/infra/cache"
 	infraconfig "GCFeed/internal/infra/config"
 	infradatabase "GCFeed/internal/infra/database"
+	inframetrics "GCFeed/internal/infra/metrics"
 	inframq "GCFeed/internal/infra/mq"
 	infraembedding "GCFeed/internal/infra/persistence/embedding"
 	infrafeed "GCFeed/internal/infra/persistence/feed"
@@ -59,6 +60,11 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	go func() {
+		if err := inframetrics.RunServer(ctx, ":9091"); err != nil {
+			log.Printf("metrics server failed: %v", err)
+		}
+	}()
 
 	if err := startWorkers(ctx, cfg, gormDB, rabbitMQ); err != nil {
 		log.Fatalf("start workers failed: %v", err)

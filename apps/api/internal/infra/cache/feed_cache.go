@@ -5,6 +5,7 @@ import (
 	applicationinteraction "GCFeed/internal/application/interaction"
 	domainfeed "GCFeed/internal/domain/feed"
 	domaininteraction "GCFeed/internal/domain/interaction"
+	inframetrics "GCFeed/internal/infra/metrics"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -60,16 +61,20 @@ func NewFeedCache(client redisWatchCmdable) *FeedCache {
 func (c *FeedCache) GetPage(ctx context.Context, key string) (*applicationfeed.FeedPage, bool, error) {
 	content, err := c.client.Get(ctx, key).Bytes()
 	if err == redis.Nil {
+		inframetrics.ObserveCacheRead("page", 1, 0, nil)
 		return nil, false, nil
 	}
 	if err != nil {
+		inframetrics.ObserveCacheRead("page", 1, 0, err)
 		return nil, false, err
 	}
 
 	var page applicationfeed.FeedPage
 	if err := json.Unmarshal(content, &page); err != nil {
+		inframetrics.ObserveCacheRead("page", 1, 0, err)
 		return nil, false, err
 	}
+	inframetrics.ObserveCacheRead("page", 1, 1, nil)
 	return &page, true, nil
 }
 
@@ -77,9 +82,12 @@ func (c *FeedCache) GetPage(ctx context.Context, key string) (*applicationfeed.F
 func (c *FeedCache) SetPage(ctx context.Context, key string, page *applicationfeed.FeedPage, ttl time.Duration) error {
 	content, err := json.Marshal(page)
 	if err != nil {
+		inframetrics.ObserveCacheWrite("page", 1, err)
 		return err
 	}
-	return c.client.Set(ctx, key, content, ttl).Err()
+	err = c.client.Set(ctx, key, content, ttl).Err()
+	inframetrics.ObserveCacheWrite("page", 1, err)
+	return err
 }
 
 // GetCards 批量读取视频卡片缓存。
@@ -91,6 +99,7 @@ func (c *FeedCache) GetCards(ctx context.Context, videoIDs []int64) (map[int64]*
 
 	values, err := c.client.MGet(ctx, cacheKeys(videoIDs, feedCardKey)...).Result()
 	if err != nil {
+		inframetrics.ObserveCacheRead("card", len(videoIDs), 0, err)
 		return nil, err
 	}
 	for index, value := range values {
@@ -107,6 +116,7 @@ func (c *FeedCache) GetCards(ctx context.Context, videoIDs []int64) (map[int64]*
 		}
 		cards[card.VideoID] = &card
 	}
+	inframetrics.ObserveCacheRead("card", len(videoIDs), len(cards), nil)
 	return cards, nil
 }
 
@@ -130,6 +140,7 @@ func (c *FeedCache) SetCards(ctx context.Context, cards map[int64]*domainfeed.Fe
 		return nil
 	}
 	_, err := pipe.Exec(ctx)
+	inframetrics.ObserveCacheWrite("card", len(cards), err)
 	return err
 }
 
@@ -146,6 +157,7 @@ func getStats(ctx context.Context, client redisStatCacheClient, videoIDs []int64
 
 	values, err := client.MGet(ctx, cacheKeys(videoIDs, feedStatKey)...).Result()
 	if err != nil {
+		inframetrics.ObserveCacheRead("stat", len(videoIDs), 0, err)
 		return nil, err
 	}
 	for index, value := range values {
@@ -176,6 +188,7 @@ func getStats(ctx context.Context, client redisStatCacheClient, videoIDs []int64
 		stats[videoID] = stat
 		_ = setActionStatJSON(ctx, client, feedStatKey(videoID), stat)
 	}
+	inframetrics.ObserveCacheRead("stat", len(videoIDs), len(stats), nil)
 	return stats, nil
 }
 
@@ -199,6 +212,7 @@ func (c *FeedCache) SetStats(ctx context.Context, stats map[int64]*domainfeed.Fe
 		return nil
 	}
 	_, err := pipe.Exec(ctx)
+	inframetrics.ObserveCacheWrite("stat", len(stats), err)
 	return err
 }
 
@@ -207,7 +221,9 @@ func (c *FeedCache) SetVideoStat(ctx context.Context, stat *domaininteraction.Vi
 	if stat == nil || stat.VideoID <= 0 {
 		return nil
 	}
-	return setActionStatJSON(ctx, c.client, feedStatKey(stat.VideoID), videoStatToFeedStat(stat))
+	err := setActionStatJSON(ctx, c.client, feedStatKey(stat.VideoID), videoStatToFeedStat(stat))
+	inframetrics.ObserveCacheWrite("stat", 1, err)
+	return err
 }
 
 func videoStatToFeedStat(stat *domaininteraction.VideoStat) *domainfeed.FeedStat {
