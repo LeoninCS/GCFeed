@@ -11,8 +11,8 @@ const DEFAULT_PLAYBACK_CONFIG = {
   buffer_ms: 1200
 };
 const FEED_SCENES = [
-  { key: "recommend", label: "推荐流", route: "/recommend", icon: "auto_awesome" },
   { key: "timeline", label: "最新视频", route: "/timeline", icon: "home" },
+  { key: "recommend", label: "推荐流", route: "/recommend", icon: "auto_awesome" },
   { key: "following", label: "关注流", route: "/following", icon: "subscriptions" },
   { key: "hot", label: "热门榜单", route: "/hotfeed", icon: "local_fire_department" }
 ];
